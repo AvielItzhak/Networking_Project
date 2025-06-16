@@ -119,19 +119,34 @@ int RequestHandler_Delete(char *FilePATH, char * Detail){
 /* This function create and send 32bit ACK Response for Upload Request - Genric function */
 int32_t RequestACK_Upload(char *Response_buf){
 
-// char *Response = NULL; // temp 
-    int32_t ACK_bytes = {0}; // initiliazied
+    // Converting to network bit order
+    int32_t ACK_bytes = htons(UPLOAD); // 16bit > 32bit with zero pad
 
-    // Setting helper variables
-    int16_t OP_ID_16bit = htons(UPLOAD);
-    
-    ACK_bytes = (int32_t)OP_ID_16bit << 16; // Response in bytes
-
-    memcpy(Response_buf, &ACK_bytes, sizeof(ACK_bytes)); // copying bytes to buffer
+    // Copying bytes to buffer    
+    memcpy(Response_buf, &ACK_bytes, sizeof(ACK_bytes));
 
     return ACK_bytes;
 }
 
+/* This function check client recivie correct ACK UPLOAD*/
+int CompareResponseTOExpectedACK(int bytes, char *Response ){
+    
+    const int32_t ACK_UPLOAD_VALUE = 0x00010000; // Correct ACK for UPLOAD
+    int32_t received_bytes = {0}; // temp var
+
+    if (bytes == 4){ // First check size corelation
+        
+        // Copy bytes into a 32bit integer variable
+        memcpy(&received_bytes, Response, sizeof(int32_t));
+
+        // Convert back to host byte order
+        received_bytes = ntohl(received_bytes);
+
+        return (received_bytes == ACK_UPLOAD_VALUE ? 1 : 0);
+    }
+
+    else {return 0;}
+}
 
 
 

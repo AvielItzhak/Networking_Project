@@ -59,7 +59,7 @@ int main() {
     // Main client Request and Data transfer Handler loop //
     while (1) {
          char ErrorHandler[256] = {0}; // Error string initialition
-         char ACK_Response[32] = {0}; 
+         char ACK_Response[4] = {0}; 
 
         // Recive Request from client
         int Req_msg_rec = recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0,
@@ -126,8 +126,8 @@ int main() {
             // Building ACK Response and sending to client
             RequestACK_Upload(ACK_Response);
             
-            // Sending 8byte ACK _Response to client
-            sendto(sockfd, ACK_Response, (size_t)8, 0,
+            // Sending 4byte ACK _Response to client
+            sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
                                  (const struct sockaddr *)&client_addr, addr_len);
             printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
 

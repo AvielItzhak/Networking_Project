@@ -30,6 +30,7 @@ typedef struct {
 
 
 int main() {
+
     int sockfd = {0};
     struct sockaddr_in server_addr;
     socklen_t server_addr_len = sizeof(server_addr);
@@ -42,6 +43,7 @@ int main() {
     printf("Note* FilePATH caculation start from server file location\n");
     scanf("%s %s",OperationNAME,FilePATH);
     printf("\nOperationNAME: %s\nFilePATH: %s\n\n",OperationNAME,FilePATH);
+
 
     // Check argument Error - Typo and missing file while uploading
     if (strcasecmp(OperationNAME, "delete") != 0  
@@ -62,6 +64,7 @@ int main() {
 
 
 
+
     // Create UDP socket
     sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) {
@@ -78,6 +81,7 @@ int main() {
         exit(EXIT_FAILURE);
     }
     
+
 
     
     // Create a massage to server based on argument
@@ -103,59 +107,73 @@ int main() {
     
 
 
+
+
     /* Response Handler - DELETE || UPLOAD || DOWNLOAD:
             * DELETE - Awaiting and Reciving server detailed Response print the info and end client.
             * DOWNLOAD - 
             * UPLOAD - 
      */ 
 
-    if (strcmp(OperationNAME,"delete") == 0){
+        // DELETE //
+    if (strcmp(OperationNAME,"delete") == 0){ 
         int Server_Response = 0, count = 0; // initilazied Loop condition
         char DEL_msg_buffer[MAX_BUFFER_SIZE] = {0};
 
+        // Reciving bytes from server
         while (Server_Response <=0 && count < CounterNUM){
+            
             Server_Response = recvfrom(sockfd, DEL_msg_buffer, MAX_BUFFER_SIZE, 0,
                                       (struct sockaddr *)&server_addr, &server_addr_len);
             count++;
         }
-
+        // Check TIMEOUT for Response from server
         if (count == CounterNUM)
         {
             printf("\nSomthing went wrong getting feedback from server");
             exit (EXIT_FAILURE);
 
-        }else {
-
+        }else { // Incase for incoming bytes print Response
             printf("\nServer Response: '%s'\n", DEL_msg_buffer);
             printf("\nClient: Got Feedback, Request finshed and client will close\n\n");
             exit (EXIT_SUCCESS);
         }
     }
 
+
+        // UPLOAD //
     if (strcmp(OperationNAME,"upload") == 0){
         int Server_Response = 0, count = 0; // initilazied Loop condition
-        char ACK_Resp_buf[32] = {0};
-
+        char ACK_Resp_buf[4] = {0};
+        
+        // Reciving bytes from server
         while (Server_Response <=0 && count < CounterNUM){
-            
-            Server_Response = recvfrom(sockfd, ACK_Resp_buf, (size_t)32, 0,
+
+            Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(int32_t), 0,
                                       (struct sockaddr *)&server_addr, &server_addr_len);
             count++;
         }
-
-        if (count == CounterNUM)
-        {
+        // Check TIMEOUT for Response from server
+        if (count == CounterNUM){ 
             printf("\nSomthing went wrong getting feedback from server");
             exit (EXIT_FAILURE);
 
-        }else {
+        }else { // Incase for incoming bytes print Response
             printf("\nServer Response:\n");
             for (int i = 0; i < Server_Response; i++) {
                 printf("%02X ", ACK_Resp_buf[i]);
             }
             printf("\n\n");
-            printf("\nClient: Got Feedback, Request finshed and client will close\n\n");
-            exit (EXIT_SUCCESS);
+
+            // Checking for correct ACK Response bytes
+
+            if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf) == 1){
+                printf("\nClient: Success Response, Request finsihed and client will close\n\n");
+                exit (EXIT_SUCCESS);
+            }else{
+                printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
+                exit (EXIT_FAILURE);
+            }
         }
     }
 
