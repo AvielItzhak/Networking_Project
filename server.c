@@ -126,7 +126,8 @@ int main() {
             // Building ACK Response and sending to client
             RequestACK_Upload(ACK_Response);
             
-            sendto(sockfd, ACK_Response, (size_t)32, 0,
+            // Sending 8byte ACK _Response to client
+            sendto(sockfd, ACK_Response, (size_t)8, 0,
                                  (const struct sockaddr *)&client_addr, addr_len);
             printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
 

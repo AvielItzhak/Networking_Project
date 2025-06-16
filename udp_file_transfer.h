@@ -116,17 +116,16 @@ int RequestHandler_Delete(char *FilePATH, char * Detail){
    return 0;
 }
 
-/* This funcrion createand send 32bit ACK Response for Upload Request - Genric function */
+/* This function create and send 32bit ACK Response for Upload Request - Genric function */
 int32_t RequestACK_Upload(char *Response_buf){
 
-    char *Response = NULL; // temp 
+// char *Response = NULL; // temp 
     int32_t ACK_bytes = {0}; // initiliazied
 
     // Setting helper variables
-    int16_t OP_ID_16bit = (int16_t)UPLOAD;
-    int16_t zero_16bit = {0};
+    int16_t OP_ID_16bit = htons(UPLOAD);
     
-    ACK_bytes = OP_ID_16bit | zero_16bit ; // Response in bytes
+    ACK_bytes = (int32_t)OP_ID_16bit << 16; // Response in bytes
 
     memcpy(Response_buf, &ACK_bytes, sizeof(ACK_bytes)); // copying bytes to buffer
 

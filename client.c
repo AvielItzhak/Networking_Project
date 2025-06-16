@@ -85,7 +85,7 @@ int main() {
     char *REQ_msg = REQ_msg_build(OperationNAME,FilePATH,&Req_message_size);
 
     if (REQ_msg != NULL) {
-        printf("Built Message (%zu bytes):\n", Req_message_size);
+        printf("Request Message (%zu bytes):\n", Req_message_size);
         for (size_t i = 0; i < Req_message_size; i++) {
             printf("%02X ", REQ_msg[i]);
         }
@@ -149,7 +149,11 @@ int main() {
             exit (EXIT_FAILURE);
 
         }else {
-            printf("\nServer Response: '%02X'\n", ACK_Resp_buf);
+            printf("\nServer Response:\n");
+            for (int i = 0; i < Server_Response; i++) {
+                printf("%02X ", ACK_Resp_buf[i]);
+            }
+            printf("\n\n");
             printf("\nClient: Got Feedback, Request finshed and client will close\n\n");
             exit (EXIT_SUCCESS);
         }
