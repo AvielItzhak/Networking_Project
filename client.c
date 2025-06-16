@@ -166,15 +166,15 @@ int main() {
             printf("\n\n");
 
             // Checking for correct ACK Response bytes
-
             if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf) == 1){
-                printf("\nClient: Success Response, Request finsihed and client will close\n\n");
-                exit (EXIT_SUCCESS);
+                printf("\nClient: Correct ACK, Initiating UPLOAD\n\n");
+                
             }else{
                 printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
                 exit (EXIT_FAILURE);
             }
         }
+        
     }
 
     
