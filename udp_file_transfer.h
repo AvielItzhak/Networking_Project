@@ -52,7 +52,7 @@ char *REQ_msg_build(char *Operation_name,char *File_Path, size_t *msg_size){
     char *message_buffer = (char *)malloc(message_size);
     if (message_buffer == NULL) {
         perror("malloc failed");
-        return NULL; // Indicate allocation failure
+        return NULL; // allocation failure
     }
 
     // Use a pointer to advance along the buffer
@@ -116,22 +116,32 @@ int RequestHandler_Delete(char *FilePATH, char * Detail){
    return 0;
 }
 
-/* This function create and send 32bit ACK Response for Upload Request - Genric function */
-int32_t RequestACK_Upload(char *Response_buf){
+
+
+/* This function create and send 32bit ACK Response for Upload Request and DATA packet
+    * It recive the intendet Response buffer pointer and packet_SeqNUM
+    * The function build the correct response and assign it to given buffer
+*/
+int ACK_Build(char *Response_buf, int16_t packet_SeqNUM){
 
     // Converting to network bit order
-    int32_t ACK_bytes = htons(UPLOAD); // 16bit > 32bit with zero pad
+    int32_t ACK_bytes = htons(ACK); // 16bit > 32bit with zero pad
+    packet_SeqNUM = htons(packet_SeqNUM);
 
-    // Copying bytes to buffer    
-    memcpy(Response_buf, &ACK_bytes, sizeof(ACK_bytes));
+    // Copying OP ID bytes to buffer    
+    memcpy(Response_buf, &ACK_bytes, sizeof(int32_t));
 
-    return ACK_bytes;
+    // Copying packet_SeqNUM bytes to  lower part of buffer    
+    memcpy(Response_buf + 2, &packet_SeqNUM, sizeof(int16_t));
+
+    return 0;
 }
 
-/* This function check client recivie correct ACK UPLOAD*/
+
+/* This function check that client recivied the correct ACK respone for UPLOAD*/
 int CompareResponseTOExpectedACK(int bytes, char *Response ){
     
-    const int32_t ACK_UPLOAD_VALUE = 0x00010000; // Correct ACK for UPLOAD
+    const int32_t ACK_UPLOAD_VALUE = 0x00040000; // Correct ACK for UPLOAD
     int32_t received_bytes = {0}; // temp var
 
     if (bytes == 4){ // First check size corelation
@@ -148,6 +158,44 @@ int CompareResponseTOExpectedACK(int bytes, char *Response ){
     else {return 0;}
 }
 
+
+char* DATApack_Build(size_t *pack_size, char *DATApack, int16_t packet_SeqNUM){
+
+    // Converting to network bit order
+    int16_t OPID = htons(DATA); 
+    packet_SeqNUM = htons(packet_SeqNUM);
+
+    // Calculate the size of the packet
+    // { OP ID + Seq Number + DataPacket }
+    size_t packet_size = sizeof(int16_t) + sizeof(int16_t) + strlen(DATApack) ;
+
+    // Dynamically allocate memory for the message buffer
+    char *packet_buffer = (char *)malloc(packet_size);
+    if (packet_buffer == NULL) {
+        perror("malloc failed");
+        return NULL; // allocation failure
+    }
+
+    // Use a pointer to advance along the buffer
+    char *current_pos = packet_buffer;
+
+    // Copy the 2 bytes OP_ID to the message buffer
+    memcpy(current_pos, &OPID, sizeof(OPID));
+    current_pos += sizeof(OPID); // Advance the pointer
+
+    // Copy the 2 bytes SeqNUM to the message buffer
+    memcpy(current_pos, &packet_SeqNUM, sizeof(packet_SeqNUM));
+    current_pos += sizeof(packet_SeqNUM); // Advance the pointer
+
+    // Copy the Data packet and its null terminator
+    strcpy(current_pos, DATApack);
+   
+    // Return packet size to main
+    *pack_size = packet_size;
+
+    return packet_buffer; // Return the pointer to the allocated buffer
+
+}
 
 
 

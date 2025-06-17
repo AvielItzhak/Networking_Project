@@ -115,7 +115,7 @@ int main() {
         if (ClientRequest.CurOP_ID == UPLOAD){
             // In case Upload folder isn't exist create it
             if (access(UPLOAD_Folder_NAME, F_OK) != 0){
-                if (mkdir(UPLOAD_Folder_NAME,777) == 0) {
+                if (mkdir(UPLOAD_Folder_NAME,700) == 0) {
                     printf("Directory '%s' created successfully.\n", UPLOAD_Folder_NAME);
                 }else {
                     perror("Error creating directory\n");
@@ -124,13 +124,44 @@ int main() {
             }
 
             // Building ACK Response and sending to client
-            RequestACK_Upload(ACK_Response);
+            ACK_Build(ACK_Response, 0);
             
             // Sending 4byte ACK _Response to client
             sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
                                  (const struct sockaddr *)&client_addr, addr_len);
             printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
 
+
+            // reciving pack and sending ACK
+            // Recive Request from client
+            int Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
+                                          (struct sockaddr *)&client_addr, &addr_len);
+            if (Req_msg_rec <= 0) {
+                perror("Error receiving message\n"); // Print Error detail in server terminal
+            
+                // Save Error detail in ErrorHandler and send it to Client
+                sprintf(ErrorHandler,"Error receiving message: %s", strerror(errno));
+                sendto(sockfd, ErrorHandler, 256, 0,(const struct sockaddr *)&client_addr, addr_len);
+            
+                printf("\nResponse sent to client\nListinig to further Request.....\n\n\n");
+                continue; // Continue listening
+            }
+             if (Req_msg_rec > 0) { // Print message recieved in bytes
+                printf("Request Message (%d bytes):\n", Req_msg_rec);
+                for (int i = 0; i < Req_msg_rec; i++) {
+                    printf("%02X ", buffer[i]);
+                }
+                printf("\n\n");
+            }
+
+
+            // Building ACK Response and sending to client
+            ACK_Build(ACK_Response, 1);
+            
+            // Sending 4byte ACK _Response to client
+            sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
+                                 (const struct sockaddr *)&client_addr, addr_len);
+            printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
         }
 
        // if (ClientRequest.CurOP_ID == DOWNLAOD){
@@ -172,18 +203,7 @@ int main() {
             // find the file and delete it after that send a indication to client
             
             break;
-        }
-
         
-        // buffer[Req_msg_rec] = '\0'; // Null-terminate the received data
-        // printf("Received from client %s:%d: %s\n",
-        //        inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), buffer);
-        // // You can process the received data here and send a response back
-        // const char *response = "Message received!";
-        // sendto(sockfd, response, strlen(response), 0,
-        //        (const struct sockaddr *)&client_addr, addr_len);
-
-        printf("\n\n\n\nTFTP Server listening on port %d...\n", PORT);
 
         */
     }

@@ -21,9 +21,11 @@ typedef struct {
 } Fileinfo;
 
 typedef struct {
-    uint32_t packet_id;
-    uint32_t packet_crc; // CRC of this packet
-    unsigned char data[Packet_Max_SIZE];
+    char filename[256];
+    int32_t packet_id;
+    int32_t packet_crc; // CRC of this packet
+    char data[Packet_Max_SIZE];
+    char *packet_buf;
 } DataPacket;
 
 
@@ -117,6 +119,7 @@ int main() {
 
         // DELETE //
     if (strcmp(OperationNAME,"delete") == 0){ 
+
         int Server_Response = 0, count = 0; // initilazied Loop condition
         char DEL_msg_buffer[MAX_BUFFER_SIZE] = {0};
 
@@ -143,6 +146,7 @@ int main() {
 
         // UPLOAD //
     if (strcmp(OperationNAME,"upload") == 0){
+
         int Server_Response = 0, count = 0; // initilazied Loop condition
         char ACK_Resp_buf[4] = {0};
         
@@ -153,29 +157,83 @@ int main() {
                                       (struct sockaddr *)&server_addr, &server_addr_len);
             count++;
         }
-        // Check TIMEOUT for Response from server
+        // Check TIMEOUT ERROR for Response from server
         if (count == CounterNUM){ 
-            printf("\nSomthing went wrong getting feedback from server");
+            printf("\nTimeout ERROR: Somthing went wrong getting feedback from server");
             exit (EXIT_FAILURE);
+        }
 
-        }else { // Incase for incoming bytes print Response
+        else { // In the case of incoming bytes print Response
             printf("\nServer Response:\n");
-            for (int i = 0; i < Server_Response; i++) {
-                printf("%02X ", ACK_Resp_buf[i]);
-            }
-            printf("\n\n");
+                for (int i = 0; i < Server_Response; i++)
+                    {printf("%02X ", ACK_Resp_buf[i]);}
+                printf("\n\n");
 
             // Checking for correct ACK Response bytes
-            if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf) == 1){
-                printf("\nClient: Correct ACK, Initiating UPLOAD\n\n");
-                
-            }else{
+            if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf) == 1)
+                {printf("\nClient: Correct ACK, Initiating UPLOAD\n\n");}
+            else {
                 printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
                 exit (EXIT_FAILURE);
             }
         }
+
+
+        /* DATA packet - Creating packet and Transfer
+            * 
+        */ 
+
+        FILE* Fpoint = NULL; // Itreator traverse file
+        DataPacket Dpack = {0}; // Create a struct for packet
+        int16_t Seq_NUM = 1;
+
+
+
+        Fpoint = fopen(FilePATH,"r+");
+
+        //while (fgets(Dpack.data, Packet_Max_SIZE, Fpoint))
+        //{
+            fgets(Dpack.data, Packet_Max_SIZE, Fpoint);
+            size_t packet_size;
+            Dpack.packet_id = Seq_NUM;
+            Dpack.packet_buf = DATApack_Build(&packet_size, Dpack.data, Dpack.packet_id);
+
+            // Sending packet to server
+            sendto(sockfd, Dpack.packet_buf, packet_size, 0,
+                (const struct sockaddr *)&server_addr, sizeof(server_addr));
+
+            // Getting ACK from server
+            Server_Response = 0, count = 0; // initilazied Loop condition
+                
+            // Reciving bytes from server
+            while (Server_Response <=0 && count < CounterNUM){
+
+                Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(int32_t), 0,
+                                          (struct sockaddr *)&server_addr, &server_addr_len);
+                count++;
+            }
+            // Check TIMEOUT ERROR for Response from server
+            if (count == CounterNUM){ 
+                printf("\nTimeout ERROR: Somthing went wrong getting feedback from server");
+                exit (EXIT_FAILURE);
+            }
+
+            else { // In the case of incoming bytes print Response
+                printf("\nServer Response:\n");
+                    for (int i = 0; i < Server_Response; i++)
+                        {printf("%02X ", ACK_Resp_buf[i]);}
+                    printf("\n\n");
+            }
+
+            // Checking for correct ACK Response bytes
+            free(Dpack.packet_buf);
+            Seq_NUM++;
+        //}
         
+        fclose(Fpoint);
+        
+
     }
 
-    
+    return 0;
 }
