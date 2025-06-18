@@ -17,7 +17,9 @@
 #define ERROR       5
 #define DELETE      6
 
-#define MAX_BUFFER_SIZE 1024 
+#define MAX_BUFFER_SIZE 2048 
+#define Packet_Max_SIZE 512
+#define CounterNUM 10
 
 
 /* This function gets pointers to string of OPID and FilePATH
@@ -138,28 +140,82 @@ int ACK_Build(char *Response_buf, int16_t packet_SeqNUM){
 }
 
 
+
+
 /* This function check that client recivied the correct ACK respone for UPLOAD*/
-int CompareResponseTOExpectedACK(int bytes, char *Response ){
+int CompareResponseTOExpectedACK(int bytes, char *Response, int16_t Exp_Seq_NUM){
     
-    const int32_t ACK_UPLOAD_VALUE = 0x00040000; // Correct ACK for UPLOAD
-    int32_t received_bytes = {0}; // temp var
+    int16_t ACK_VALUE = 0x0004; // Correct ACK for UPLOAD
+    int16_t Seq_NUM_Rec_bytes = {0}; // temp var
+    int16_t OPID_Rec_bytes = {0}; // temp var
 
-    if (bytes == 4){ // First check size corelation
+    // Convert to network byte order
+    Exp_Seq_NUM = ntohs(Exp_Seq_NUM);
+
+    // Copy the first 2 bytes into a 16bit integer variable
+    memcpy(&OPID_Rec_bytes, Response, sizeof(int16_t));
+
+    // Convert to host byte order
+    OPID_Rec_bytes = ntohs(OPID_Rec_bytes);
+
+    if (bytes == 4 && OPID_Rec_bytes == ACK_VALUE) { // First check size corelation and OPID is ACK
         
-        // Copy bytes into a 32bit integer variable
-        memcpy(&received_bytes, Response, sizeof(int32_t));
+        // Copy the last 2 bytes into a 16bit integer variable
+        memcpy(&Seq_NUM_Rec_bytes, Response + 2, sizeof(int16_t));
 
-        // Convert back to host byte order
-        received_bytes = ntohl(received_bytes);
-
-        return (received_bytes == ACK_UPLOAD_VALUE ? 1 : 0);
+        return (Seq_NUM_Rec_bytes == Exp_Seq_NUM ? 1 : 0);
     }
 
-    else {return 0;}
+    else {return 0;} // If not the right size
+
+} 
+
+
+
+/* this  */
+int ServerResponseHandleACK(int sockfd, struct sockaddr_in server_addr,  socklen_t server_addr_len, int16_t Seq_NUM) {
+       
+        int Server_Response = 0, count = 0; // initilazied Loop condition
+        char ACK_Resp_buf[4] = {0}; 
+
+        // Reciving bytes from server
+        while (Server_Response <=0 && count < CounterNUM){
+
+            Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(int32_t), 0,
+                                      (struct sockaddr *)&server_addr, &server_addr_len);
+            count++;
+        }
+        // Check TIMEOUT ERROR for Response from server
+        if (count == CounterNUM){ 
+            printf("\nTimeout ERROR: Somthing went wrong getting feedback from server");
+            exit (EXIT_FAILURE);
+        }
+
+        else { // In the case of incoming bytes print Response
+            printf("\nServer Response:\n");
+                for (int i = 0; i < Server_Response; i++)
+                    {printf("%02X ", ACK_Resp_buf[i]);}
+                printf("\n\n");
+
+            // Checking for correct ACK Response bytes
+            if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf, Seq_NUM) == 1)
+                {printf("\nClient: Correct ACK, Initiating UPLOAD\n\n");}
+            else {
+                printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
+                exit (EXIT_FAILURE);
+            }
+        }
+
+        return 0;
 }
 
 
-char* DATApack_Build(size_t *pack_size, char *DATApack, int16_t packet_SeqNUM){
+
+
+
+/* This function .....*/
+
+char* DATApack_Build(size_t DATAsize, char *DATApack, int16_t packet_SeqNUM){
 
     // Converting to network bit order
     int16_t OPID = htons(DATA); 
@@ -167,7 +223,7 @@ char* DATApack_Build(size_t *pack_size, char *DATApack, int16_t packet_SeqNUM){
 
     // Calculate the size of the packet
     // { OP ID + Seq Number + DataPacket }
-    size_t packet_size = sizeof(int16_t) + sizeof(int16_t) + strlen(DATApack) ;
+    size_t packet_size = DATAsize + 4 ;
 
     // Dynamically allocate memory for the message buffer
     char *packet_buffer = (char *)malloc(packet_size);
@@ -188,14 +244,13 @@ char* DATApack_Build(size_t *pack_size, char *DATApack, int16_t packet_SeqNUM){
     current_pos += sizeof(packet_SeqNUM); // Advance the pointer
 
     // Copy the Data packet and its null terminator
-    strcpy(current_pos, DATApack);
+    memcpy(current_pos, DATApack,DATAsize);
    
-    // Return packet size to main
-    *pack_size = packet_size;
-
     return packet_buffer; // Return the pointer to the allocated buffer
 
 }
+
+
 
 
 

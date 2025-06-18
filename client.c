@@ -9,7 +9,7 @@
 
 #define SERVER_IP "127.0.0.1" // Loopback
 #define PORT 55555
-#define MAX_BUFFER_SIZE 1024
+#define MAX_BUFFER_SIZE 2048
 #define Packet_Max_SIZE 512
 #define CounterNUM 10
 
@@ -25,6 +25,7 @@ typedef struct {
     int32_t packet_id;
     int32_t packet_crc; // CRC of this packet
     char data[Packet_Max_SIZE];
+    size_t data_size;
     char *packet_buf;
 } DataPacket;
 
@@ -147,92 +148,74 @@ int main() {
         // UPLOAD //
     if (strcmp(OperationNAME,"upload") == 0){
 
-        int Server_Response = 0, count = 0; // initilazied Loop condition
-        char ACK_Resp_buf[4] = {0};
-        
-        // Reciving bytes from server
-        while (Server_Response <=0 && count < CounterNUM){
-
-            Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(int32_t), 0,
-                                      (struct sockaddr *)&server_addr, &server_addr_len);
-            count++;
-        }
-        // Check TIMEOUT ERROR for Response from server
-        if (count == CounterNUM){ 
-            printf("\nTimeout ERROR: Somthing went wrong getting feedback from server");
-            exit (EXIT_FAILURE);
-        }
-
-        else { // In the case of incoming bytes print Response
-            printf("\nServer Response:\n");
-                for (int i = 0; i < Server_Response; i++)
-                    {printf("%02X ", ACK_Resp_buf[i]);}
-                printf("\n\n");
-
-            // Checking for correct ACK Response bytes
-            if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf) == 1)
-                {printf("\nClient: Correct ACK, Initiating UPLOAD\n\n");}
-            else {
-                printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
-                exit (EXIT_FAILURE);
-            }
-        }
-
+        // Handeling Server Response for intial UPLOAD Request
+        ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, 0);
 
         /* DATA packet - Creating packet and Transfer
             * 
         */ 
-
+        
         FILE* Fpoint = NULL; // Itreator traverse file
-        DataPacket Dpack = {0}; // Create a struct for packet
-        int16_t Seq_NUM = 1;
+        int16_t Seq_NUM = 1; // Initial packet number
+        size_t last_DATApack_size = 0; // helper var
+        size_t packet_buf_size = 0; // full data message size
 
+        Fpoint = fopen(FilePATH,"r"); // creating a poineter file to scan the intented file
 
-
-        Fpoint = fopen(FilePATH,"r+");
-
-        //while (fgets(Dpack.data, Packet_Max_SIZE, Fpoint))
-        //{
-            fgets(Dpack.data, Packet_Max_SIZE, Fpoint);
-            size_t packet_size;
+        // Transfer loop
+        while (1) // Return 0 when reach the end
+        {
+            DataPacket Dpack = {0}; // Create a struct for packet
             Dpack.packet_id = Seq_NUM;
-            Dpack.packet_buf = DATApack_Build(&packet_size, Dpack.data, Dpack.packet_id);
+            
+            // Filling up a container to up to a total max of 512(-4) bytes
+            Dpack.data_size = fread(Dpack.data, 1,  Packet_Max_SIZE-4 , Fpoint);
+
+
+            // Check for EOF - Condition to end loop
+            if (Dpack.data_size == 0) {
+                 
+                if (feof(Fpoint)) { // Due to EOF
+                    printf("\nReached END OF FILE.\n");
+                    if (last_DATApack_size == 508) // special case
+                        {memset(Dpack.data, 0, Packet_Max_SIZE - 4);;} // give server indication for ending transfer
+                    else 
+                        {break;} // End transfer loop
+                 
+                } 
+                else if (ferror(Fpoint)) { // Due to ERROR
+                    printf("ERROR while reading from file.\n\n");
+                    break; //****ERRROr HANDLER */
+                }
+            }
+
+
+            // Building DATA packet message
+            Dpack.packet_buf = DATApack_Build(Dpack.data_size, Dpack.data, Dpack.packet_id);
+            packet_buf_size = Dpack.data_size + 4;
 
             // Sending packet to server
-            sendto(sockfd, Dpack.packet_buf, packet_size, 0,
+            sendto(sockfd, Dpack.packet_buf, packet_buf_size, 0,
                 (const struct sockaddr *)&server_addr, sizeof(server_addr));
 
-            // Getting ACK from server
-            Server_Response = 0, count = 0; // initilazied Loop condition
-                
-            // Reciving bytes from server
-            while (Server_Response <=0 && count < CounterNUM){
+            // Handeling Server Response for packet Transfer 
+            printf("\nOPID & SeqNUM in bytes (%ld):  ",packet_buf_size);
+                for (size_t i = 0; i < 4; i++)
+                    {printf("%02X ", Dpack.packet_buf[i]);}
+                printf("\n\n");
 
-                Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(int32_t), 0,
-                                          (struct sockaddr *)&server_addr, &server_addr_len);
-                count++;
-            }
-            // Check TIMEOUT ERROR for Response from server
-            if (count == CounterNUM){ 
-                printf("\nTimeout ERROR: Somthing went wrong getting feedback from server");
-                exit (EXIT_FAILURE);
-            }
-
-            else { // In the case of incoming bytes print Response
-                printf("\nServer Response:\n");
-                    for (int i = 0; i < Server_Response; i++)
-                        {printf("%02X ", ACK_Resp_buf[i]);}
-                    printf("\n\n");
-            }
-
-            // Checking for correct ACK Response bytes
+            ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, Dpack.packet_id);
+            
+            // Preparing variables for next itertion - Freeing allocated memory
             free(Dpack.packet_buf);
             Seq_NUM++;
-        //}
+            last_DATApack_size = Dpack.data_size;
+
+        }
         
         fclose(Fpoint);
         
-
+       
     }
 
     return 0;

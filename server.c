@@ -6,7 +6,7 @@
 #include "udp_file_transfer.h"
 
 #define PORT 55555
-#define MAX_BUFFER_SIZE 1024
+#define MAX_BUFFER_SIZE 2048
 #define Packet_Max_SIZE 512
 #define UPLOAD_Folder_NAME "./UploadedFiles"
 
@@ -53,13 +53,15 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    printf("TFTP Server listening on port %d...\n", PORT);
+    
 
 
     // Main client Request and Data transfer Handler loop //
     while (1) {
          char ErrorHandler[256] = {0}; // Error string initialition
          char ACK_Response[4] = {0}; 
+
+        printf("TFTP Server listening on port %d...\n", PORT);
 
         // Recive Request from client
         int Req_msg_rec = recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0,
@@ -113,7 +115,7 @@ int main() {
         }
 
         if (ClientRequest.CurOP_ID == UPLOAD){
-            // In case Upload folder isn't exist create it
+            // In case Upload folder doesn't exist create it
             if (access(UPLOAD_Folder_NAME, F_OK) != 0){
                 if (mkdir(UPLOAD_Folder_NAME,700) == 0) {
                     printf("Directory '%s' created successfully.\n", UPLOAD_Folder_NAME);
@@ -132,80 +134,57 @@ int main() {
             printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
 
 
-            // reciving pack and sending ACK
-            // Recive Request from client
-            int Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
-                                          (struct sockaddr *)&client_addr, &addr_len);
-            if (Req_msg_rec <= 0) {
-                perror("Error receiving message\n"); // Print Error detail in server terminal
-            
-                // Save Error detail in ErrorHandler and send it to Client
-                sprintf(ErrorHandler,"Error receiving message: %s", strerror(errno));
-                sendto(sockfd, ErrorHandler, 256, 0,(const struct sockaddr *)&client_addr, addr_len);
-            
-                printf("\nResponse sent to client\nListinig to further Request.....\n\n\n");
-                continue; // Continue listening
-            }
-             if (Req_msg_rec > 0) { // Print message recieved in bytes
-                printf("Request Message (%d bytes):\n", Req_msg_rec);
-                for (int i = 0; i < Req_msg_rec; i++) {
-                    printf("%02X ", buffer[i]);
+            // Reciving packet and sending ACK
+            while (1) {
+
+                // Recive Request from client
+                int Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
+                                              (struct sockaddr *)&client_addr, &addr_len);
+
+                if ( Req_msg_rec <= 0) { // ERROR
+                    perror("Error receiving message\n"); // Print Error detail in server terminal
+                
+                    // Save Error detail in ErrorHandler and send it to Client
+                    sprintf(ErrorHandler,"Error receiving message: %s", strerror(errno));
+                    sendto(sockfd, ErrorHandler, 256, 0,(const struct sockaddr *)&client_addr, addr_len);
+                
+                    printf("\nResponse sent to client\nListinig to further Request.....\n\n\n");
+                    continue; // Continue listening
                 }
-                printf("\n\n");
-            }
 
-
-            // Building ACK Response and sending to client
-            ACK_Build(ACK_Response, 1);
+                if ( Req_msg_rec > 4 ) { // Print message recieved in bytes
+                   printf("DATA Message (%d bytes):\n", Req_msg_rec);
+                   for (int i = 0; i < 4; i++) 
+                       {printf("%02X ", buffer[i]);}
+                    printf("\n\n");
+                }
             
-            // Sending 4byte ACK _Response to client
-            sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
-                                 (const struct sockaddr *)&client_addr, addr_len);
-            printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
-        }
+                if ( Req_msg_rec == 4 || Req_msg_rec != 512 ) { // Reached END OF FILE
 
-       // if (ClientRequest.CurOP_ID == DOWNLAOD){
-       //     
-       //     
-       //     sendto(sockfd, ClientRequest.CurOP_Detail, strlen(ClientRequest.CurOP_Detail), 0,
-       //                          (const struct sockaddr *)&client_addr, addr_len);
-       //     printf("\nResponse sent to client\nListinig to further Request.....\n\n\n");
-       // }
+                    // Building ACK Response and sending to client
+                    ACK_Build(ACK_Response, (int16_t)((buffer[2] << 8) | buffer[3]));
+                    
+                    // Sending 4byte ACK _Response to client
+                    sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
+                                         (const struct sockaddr *)&client_addr, addr_len);
+                    printf("\nEOF: Response sent to client\n\n");
+                    break;
+                }
 
+                // If reach here in the loop: (the order of the if condition is relvenat)
+                // Building ACK Response and sending to client
+                ACK_Build(ACK_Response, (int16_t)((buffer[2] << 8) | buffer[3]));
+                
+                // Sending 4byte ACK _Response to client
+                sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
+                                     (const struct sockaddr *)&client_addr, addr_len);
+                printf("\nMessage Recived. Response sent to client\nAwaiting further Data packets.....\n\n");
+
+            }  
+
+        }   
         
-        /*
-
-        // Decrypting and checking integrity
-        int bytes_rec_decrypt = Decryption(Req_msg_rec);
-        if (bytes_rec_decrypt = 0) {
-            perror("Error currapted packet");
-            continue; // Continue listening, send package again 
-        }
-
-        // Check if packet according to the format and following request
-        char **Req_info = Request_format_check(bytes_rec_decrypt);
-        if (Req_info == 0){ 
-            perror("Error packet not according to format");
-            continue; // Continue listening, send package again  
-        }
-
-        // Action according to the request
-        switch (*Req_info[0]) {
-          case 1: // RRQ
-            // find file and sent it to client without ACK first
-
-            break;
-          case 2: // WRQ
-            // send ACK and waitng for packet
-
-            break;
-          case 7: // delete
-            // find the file and delete it after that send a indication to client
-            
-            break;
-        
-
-        */
+       
     }
 
 
