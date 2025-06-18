@@ -17,7 +17,7 @@
 #define ERROR       5
 #define DELETE      6
 
-#define MAX_BUFFER_SIZE 2048 
+#define MAX_BUFFER_SIZE 1024 
 #define Packet_Max_SIZE 512
 #define CounterNUM 10
 
@@ -139,7 +139,18 @@ int ACK_Build(char *Response_buf, int16_t packet_SeqNUM){
     return 0;
 }
 
+/* A complemntry function to send ACK_build output*/
+int ACK_Build_send(int sockfd, struct sockaddr_in client_addr, socklen_t addr_len,char *ACK_Response, int16_t packet_SeqNUM){
 
+    // Building ACK Response and sending to client
+    ACK_Build(ACK_Response, packet_SeqNUM);
+    
+    // Sending 4byte ACK _Response to client
+    sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
+                            (const struct sockaddr *)&client_addr, addr_len);
+
+    return 0;
+}
 
 
 /* This function check that client recivied the correct ACK respone for UPLOAD*/

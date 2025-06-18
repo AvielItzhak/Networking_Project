@@ -9,19 +9,18 @@
 
 #define SERVER_IP "127.0.0.1" // Loopback
 #define PORT 55555
-#define MAX_BUFFER_SIZE 2048
+#define MAX_BUFFER_SIZE 1024
 #define Packet_Max_SIZE 512
 #define CounterNUM 10
 
 
 typedef struct {
-    uint32_t file_size;
-    uint32_t file_crc; // Overall file CRC
-    char filename[MAX_BUFFER_SIZE];
-} Fileinfo;
+    char OperationNAME[9];
+    char FilePATH[256];
+    char FileNAME[128];
+} Requestinfo;
 
 typedef struct {
-    char filename[256];
     int32_t packet_id;
     int32_t packet_crc; // CRC of this packet
     char data[Packet_Max_SIZE];
@@ -37,31 +36,38 @@ int main() {
     int sockfd = {0};
     struct sockaddr_in server_addr;
     socklen_t server_addr_len = sizeof(server_addr);
-    char OperationNAME[9]= {0};
-    char FilePATH[256]= {0};
+    Requestinfo Request = {0};
     
 
     // Ask for user to input Request
     printf("\nPlease type: <OperationNAME> <FilePATH\n");
     printf("Note* FilePATH caculation start from server file location\n");
-    scanf("%s %s",OperationNAME,FilePATH);
-    printf("\nOperationNAME: %s\nFilePATH: %s\n\n",OperationNAME,FilePATH);
+    scanf("%s %s",Request.OperationNAME,Request.FilePATH);
+    printf("\nOperationNAME: %s\nFilePATH: %s\n\n",Request.OperationNAME,Request.FilePATH);
+
+    // Getting File NAME
+    char* last_slash = strrchr(Request.FilePATH, '/'); // pointing to the last location of '/' in FilePATH
+    if (last_slash != NULL) // Initial input given was a PATH
+        {memcpy(Request.FileNAME, last_slash + 1, sizeof(Request.FilePATH - (last_slash + 1)));} 
+
+    else// Initial input given was a File NAME
+        {memcpy(Request.FileNAME, Request.FilePATH, sizeof(Request.FileNAME));}
 
 
     // Check argument Error - Typo and missing file while uploading
-    if (strcasecmp(OperationNAME, "delete") != 0  
-        && strcasecmp(OperationNAME, "download") != 0 
-        && strcasecmp(OperationNAME, "upload") != 0) {
+    if (strcasecmp(Request.OperationNAME, "delete") != 0  
+        && strcasecmp(Request.OperationNAME, "download") != 0 
+        && strcasecmp(Request.OperationNAME, "upload") != 0) {
 
         perror("Wrong input...\n");
         exit(EXIT_FAILURE);
     }
-    if (access(FilePATH, F_OK) != 0 && strcasecmp(OperationNAME, "upload") == 0) {
-        fprintf(stderr, "File '%s' not found.\n\n", FilePATH);
+    if (access(Request.FilePATH, F_OK) != 0 && strcasecmp(Request.OperationNAME, "upload") == 0) {
+        fprintf(stderr, "File '%s' not found.\n\n", Request.FilePATH);
         exit(EXIT_FAILURE);
     }
-    if (access(FilePATH, R_OK) != 0 && strcasecmp(OperationNAME, "upload") == 0) {
-        fprintf(stderr, "File '%s' doesn't have read premission.\n\n", FilePATH);
+    if (access(Request.FilePATH, R_OK) != 0 && strcasecmp(Request.OperationNAME, "upload") == 0) {
+        fprintf(stderr, "File '%s' doesn't have read premission.\n\n", Request.FilePATH);
         exit(EXIT_FAILURE);
     }
 
@@ -89,7 +95,10 @@ int main() {
     
     // Create a massage to server based on argument
     size_t Req_message_size;
-    char *REQ_msg = REQ_msg_build(OperationNAME,FilePATH,&Req_message_size);
+
+    char *REQ_msg = REQ_msg_build(Request.OperationNAME
+        ,(strcasecmp(Request.OperationNAME,"upload") == 0) ? Request.FileNAME : Request.FilePATH 
+        ,&Req_message_size); // In the case of UPLOAD send only FileNAME
 
     if (REQ_msg != NULL) {
         printf("Request Message (%zu bytes):\n", Req_message_size);
@@ -111,16 +120,16 @@ int main() {
 
 
 
-
     /* Response Handler - DELETE || UPLOAD || DOWNLOAD:
             * DELETE - Awaiting and Reciving server detailed Response print the info and end client.
-            * DOWNLOAD - 
             * UPLOAD - 
+            * DOWNLOAD - 
+
      */ 
 
-        // DELETE //
-    if (strcmp(OperationNAME,"delete") == 0){ 
-
+        // DELETE Operation Handler section //
+    if (strcasecmp(Request.OperationNAME,"delete") == 0) 
+    {
         int Server_Response = 0, count = 0; // initilazied Loop condition
         char DEL_msg_buffer[MAX_BUFFER_SIZE] = {0};
 
@@ -137,39 +146,39 @@ int main() {
             printf("\nSomthing went wrong getting feedback from server");
             exit (EXIT_FAILURE);
 
-        }else { // Incase for incoming bytes print Response
+        }
+        else  // Incase for incoming bytes print Response
+        {    
             printf("\nServer Response: '%s'\n", DEL_msg_buffer);
             printf("\nClient: Got Feedback, Request finshed and client will close\n\n");
             exit (EXIT_SUCCESS);
         }
-    }
+    } // END of DELETE Handler
 
 
-        // UPLOAD //
-    if (strcmp(OperationNAME,"upload") == 0){
-
+        // UPLOAD Operation Handler section //
+    if (strcasecmp(Request.OperationNAME,"upload") == 0)
+    {
         // Handeling Server Response for intial UPLOAD Request
         ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, 0);
 
-        /* DATA packet - Creating packet and Transfer
-            * 
-        */ 
         
+        // Creating a DATA packet from reading file and send it to server
         FILE* Fpoint = NULL; // Itreator traverse file
         int16_t Seq_NUM = 1; // Initial packet number
         size_t last_DATApack_size = 0; // helper var
         size_t packet_buf_size = 0; // full data message size
 
-        Fpoint = fopen(FilePATH,"r"); // creating a poineter file to scan the intented file
+        Fpoint = fopen(Request.FilePATH,"r"); // creating a poineter file to scan the intented file
 
-        // Transfer loop
-        while (1) // Return 0 when reach the end
+        // nain UPLOAD to server Transfer loop
+        while (1) 
         {
             DataPacket Dpack = {0}; // Create a struct for packet
             Dpack.packet_id = Seq_NUM;
             
             // Filling up a container to up to a total max of 512(-4) bytes
-            Dpack.data_size = fread(Dpack.data, 1,  Packet_Max_SIZE-4 , Fpoint);
+            Dpack.data_size = fread(Dpack.data, 1, Packet_Max_SIZE-4, Fpoint);
 
 
             // Check for EOF - Condition to end loop
@@ -180,7 +189,7 @@ int main() {
                     if (last_DATApack_size == 508) // special case
                         {memset(Dpack.data, 0, Packet_Max_SIZE - 4);;} // give server indication for ending transfer
                     else 
-                        {break;} // End transfer loop
+                        {free(Dpack.packet_buf); break;} // End transfer loop
                  
                 } 
                 else if (ferror(Fpoint)) { // Due to ERROR
@@ -188,7 +197,6 @@ int main() {
                     break; //****ERRROr HANDLER */
                 }
             }
-
 
             // Building DATA packet message
             Dpack.packet_buf = DATApack_Build(Dpack.data_size, Dpack.data, Dpack.packet_id);
@@ -214,9 +222,15 @@ int main() {
         }
         
         fclose(Fpoint);
-        
+
+        // If reach here the UPLOAD was successfull and client will close
+        printf ("\n\nUPLOAD Request completed\nclient will now close.\n\n");
+        exit (EXIT_SUCCESS);
        
-    }
+    }// END of UPLOAD Handler
+
+    // DOWNLOAD
+
 
     return 0;
-}
+}// END of main
