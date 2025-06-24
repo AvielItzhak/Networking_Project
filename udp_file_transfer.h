@@ -19,7 +19,52 @@
 
 #define MAX_BUFFER_SIZE 1024 
 #define Packet_Max_SIZE 512
-#define CounterNUM 10
+#define TimeoutValue 10
+
+
+
+typedef struct {
+    char OperationNAME[9];
+    char FilePATH[256];
+    char FileNAME[128];
+} Requestinfo;
+
+typedef struct {
+    u_int16_t packet_id;
+    int32_t packet_crc; // CRC of this packet
+    char data[Packet_Max_SIZE];
+    size_t data_size;
+    unsigned char *packet_buf;
+} DataPacket;
+
+typedef struct {// Request INFO
+    int16_t CurOP_ID;
+    char CurOP_FilePATH[256];
+    size_t FilePATH_len;
+    char CurOP_Detail[256];
+} CurrRequestINFO;
+
+
+
+// Check argument Error - Typo and missing file while uploading
+void CheckArgError (char OperationNAME[9], char FilePATH[128])
+{
+    if (strcasecmp(OperationNAME, "delete") != 0  
+        && strcasecmp(OperationNAME, "download") != 0 
+        && strcasecmp(OperationNAME, "upload") != 0) {
+
+        perror("Wrong input...\n");
+        exit(EXIT_FAILURE);
+    }
+    if (access(FilePATH, F_OK) != 0 && strcasecmp(OperationNAME, "upload") == 0) {
+        fprintf(stderr, "File '%s' not found.\n\n", FilePATH);
+        exit(EXIT_FAILURE);
+    }
+    if (access(FilePATH, R_OK) != 0 && strcasecmp(OperationNAME, "upload") == 0) {
+        fprintf(stderr, "File '%s' doesn't have read premission.\n\n", FilePATH);
+        exit(EXIT_FAILURE);
+    }
+}
 
 
 /* This function gets pointers to string of OPID and FilePATH
@@ -83,7 +128,7 @@ char *REQ_msg_build(char *Operation_name,char *File_Path, size_t *msg_size){
  * Then using the pointers given store in var at the main server
 */
 
-int Convert_REQBytes_String(char REQBytes[MAX_BUFFER_SIZE], size_t * FilePATH_len, int16_t *OPID,char *FilePATH){
+int Convert_REQBytes_String(unsigned char REQBytes[MAX_BUFFER_SIZE], size_t * FilePATH_len, int16_t *OPID,char *FilePATH){
     // Finding Operation name ID
     *OPID = (int16_t)REQBytes[1];
 
@@ -124,29 +169,29 @@ int RequestHandler_Delete(char *FilePATH, char * Detail){
     * It recive the intendet Response buffer pointer and packet_SeqNUM
     * The function build the correct response and assign it to given buffer
 */
-int ACK_Build(char *Response_buf, int16_t packet_SeqNUM){
+int ACK_Build(unsigned char *Response_buf, u_int16_t packet_SeqNUM){
 
     // Converting to network bit order
     int32_t ACK_bytes = htons(ACK); // 16bit > 32bit with zero pad
     packet_SeqNUM = htons(packet_SeqNUM);
 
     // Copying OP ID bytes to buffer    
-    memcpy(Response_buf, &ACK_bytes, sizeof(int32_t));
+    memcpy(Response_buf, &ACK_bytes, sizeof(ACK_bytes));
 
     // Copying packet_SeqNUM bytes to  lower part of buffer    
-    memcpy(Response_buf + 2, &packet_SeqNUM, sizeof(int16_t));
+    memcpy(Response_buf + 2, &packet_SeqNUM, sizeof(packet_SeqNUM));
 
     return 0;
 }
 
 /* A complemntry function to send ACK_build output*/
-int ACK_Build_send(int sockfd, struct sockaddr_in client_addr, socklen_t addr_len,char *ACK_Response, int16_t packet_SeqNUM){
+int ACK_Build_send(int sockfd, struct sockaddr_in client_addr, socklen_t addr_len,unsigned char *ACK_Response, u_int16_t packet_SeqNUM){
 
     // Building ACK Response and sending to client
     ACK_Build(ACK_Response, packet_SeqNUM);
     
     // Sending 4byte ACK _Response to client
-    sendto(sockfd, ACK_Response, sizeof(int32_t), 0,
+    sendto(sockfd, ACK_Response, sizeof(ACK_Response), 0,
                             (const struct sockaddr *)&client_addr, addr_len);
 
     return 0;
@@ -154,17 +199,17 @@ int ACK_Build_send(int sockfd, struct sockaddr_in client_addr, socklen_t addr_le
 
 
 /* This function check that client recivied the correct ACK respone for UPLOAD*/
-int CompareResponseTOExpectedACK(int bytes, char *Response, int16_t Exp_Seq_NUM){
+int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t Exp_Seq_NUM){
     
     int16_t ACK_VALUE = 0x0004; // Correct ACK for UPLOAD
-    int16_t Seq_NUM_Rec_bytes = {0}; // temp var
+    u_int16_t Seq_NUM_Rec_bytes = {0}; // temp var
     int16_t OPID_Rec_bytes = {0}; // temp var
 
     // Convert to network byte order
     Exp_Seq_NUM = ntohs(Exp_Seq_NUM);
 
     // Copy the first 2 bytes into a 16bit integer variable
-    memcpy(&OPID_Rec_bytes, Response, sizeof(int16_t));
+    memcpy(&OPID_Rec_bytes, Response, sizeof(OPID_Rec_bytes));
 
     // Convert to host byte order
     OPID_Rec_bytes = ntohs(OPID_Rec_bytes);
@@ -172,7 +217,7 @@ int CompareResponseTOExpectedACK(int bytes, char *Response, int16_t Exp_Seq_NUM)
     if (bytes == 4 && OPID_Rec_bytes == ACK_VALUE) { // First check size corelation and OPID is ACK
         
         // Copy the last 2 bytes into a 16bit integer variable
-        memcpy(&Seq_NUM_Rec_bytes, Response + 2, sizeof(int16_t));
+        memcpy(&Seq_NUM_Rec_bytes, Response + 2, sizeof(Seq_NUM_Rec_bytes));
 
         return (Seq_NUM_Rec_bytes == Exp_Seq_NUM ? 1 : 0);
     }
@@ -183,24 +228,32 @@ int CompareResponseTOExpectedACK(int bytes, char *Response, int16_t Exp_Seq_NUM)
 
 
 
-/* this  */
+/* This function recive Response from and check ERRORS and Correct Response */ 
 int ServerResponseHandleACK(int sockfd, struct sockaddr_in server_addr,  socklen_t server_addr_len, int16_t Seq_NUM) {
        
-        int Server_Response = 0, count = 0; // initilazied Loop condition
-        char ACK_Resp_buf[4] = {0}; 
+        int Server_Response = 0; // initilazied Loop condition
+        unsigned char ACK_Resp_buf[4] = {0}; 
 
-        // Reciving bytes from server
-        while (Server_Response <=0 && count < CounterNUM){
-
-            Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(int32_t), 0,
+         // Reciving bytes from server
+        Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(ACK_Resp_buf), 0,
                                       (struct sockaddr *)&server_addr, &server_addr_len);
-            count++;
-        }
-        // Check TIMEOUT ERROR for Response from server
-        if (count == CounterNUM){ 
-            printf("\nTimeout ERROR: Somthing went wrong getting feedback from server");
-            exit (EXIT_FAILURE);
-        }
+
+        // Check ERROR and Timeout
+        if (Server_Response < 4)
+        {
+            // Check Timeout ERROR
+            if (errno == EAGAIN || errno == EWOULDBLOCK) { 
+                perror("\nTimeout occurred while waiting for Response");
+                printf("\nEnding Transfer session now due to timeout\n\n");
+                exit (errno); 
+            }
+            else // Other ERRORS
+            {
+                perror("Error Receiving message\n"); // Print Error detail in server terminal
+                printf("\nClient: *Didn't* Got Feedback, Request finshed and client will close\n\n");
+                exit (EXIT_FAILURE);
+            }    
+        }   
 
         else { // In the case of incoming bytes print Response
             printf("\nServer Response:\n");
@@ -216,17 +269,15 @@ int ServerResponseHandleACK(int sockfd, struct sockaddr_in server_addr,  socklen
                 exit (EXIT_FAILURE);
             }
         }
-
         return 0;
 }
 
 
 
 
-
 /* This function .....*/
 
-char* DATApack_Build(size_t DATAsize, char *DATApack, int16_t packet_SeqNUM){
+unsigned char* DATApack_Build(size_t DATAsize, char *DATApack, u_int16_t packet_SeqNUM){
 
     // Converting to network bit order
     int16_t OPID = htons(DATA); 
@@ -237,14 +288,14 @@ char* DATApack_Build(size_t DATAsize, char *DATApack, int16_t packet_SeqNUM){
     size_t packet_size = DATAsize + 4 ;
 
     // Dynamically allocate memory for the message buffer
-    char *packet_buffer = (char *)malloc(packet_size);
+    unsigned char *packet_buffer = (unsigned char *)malloc(packet_size);
     if (packet_buffer == NULL) {
         perror("malloc failed");
         return NULL; // allocation failure
     }
 
     // Use a pointer to advance along the buffer
-    char *current_pos = packet_buffer;
+    unsigned char *current_pos = packet_buffer;
 
     // Copy the 2 bytes OP_ID to the message buffer
     memcpy(current_pos, &OPID, sizeof(OPID));

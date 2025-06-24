@@ -4,29 +4,13 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <sys/time.h>
 #include "udp_file_transfer.h"
 
 
 #define SERVER_IP "127.0.0.1" // Loopback
 #define PORT 55555
-#define MAX_BUFFER_SIZE 1024
-#define Packet_Max_SIZE 512
-#define CounterNUM 10
 
-
-typedef struct {
-    char OperationNAME[9];
-    char FilePATH[256];
-    char FileNAME[128];
-} Requestinfo;
-
-typedef struct {
-    int32_t packet_id;
-    int32_t packet_crc; // CRC of this packet
-    char data[Packet_Max_SIZE];
-    size_t data_size;
-    char *packet_buf;
-} DataPacket;
 
 
 
@@ -45,6 +29,7 @@ int main() {
     scanf("%s %s",Request.OperationNAME,Request.FilePATH);
     printf("\nOperationNAME: %s\nFilePATH: %s\n\n",Request.OperationNAME,Request.FilePATH);
 
+
     // Getting File NAME
     char* last_slash = strrchr(Request.FilePATH, '/'); // pointing to the last location of '/' in FilePATH
     if (last_slash != NULL) // Initial input given was a PATH
@@ -55,23 +40,7 @@ int main() {
 
 
     // Check argument Error - Typo and missing file while uploading
-    if (strcasecmp(Request.OperationNAME, "delete") != 0  
-        && strcasecmp(Request.OperationNAME, "download") != 0 
-        && strcasecmp(Request.OperationNAME, "upload") != 0) {
-
-        perror("Wrong input...\n");
-        exit(EXIT_FAILURE);
-    }
-    if (access(Request.FilePATH, F_OK) != 0 && strcasecmp(Request.OperationNAME, "upload") == 0) {
-        fprintf(stderr, "File '%s' not found.\n\n", Request.FilePATH);
-        exit(EXIT_FAILURE);
-    }
-    if (access(Request.FilePATH, R_OK) != 0 && strcasecmp(Request.OperationNAME, "upload") == 0) {
-        fprintf(stderr, "File '%s' doesn't have read premission.\n\n", Request.FilePATH);
-        exit(EXIT_FAILURE);
-    }
-
-
+    CheckArgError (Request.OperationNAME, Request.FilePATH);
 
 
     // Create UDP socket
@@ -117,6 +86,11 @@ int main() {
 
     free(REQ_msg); // Freeing allocated memory used
     
+    // Defining Timeout for connection and Settin it as OFF
+    struct timeval tv;
+    tv.tv_sec = 0; 
+    tv.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
 
 
@@ -128,25 +102,38 @@ int main() {
      */ 
 
         // DELETE Operation Handler section //
+
     if (strcasecmp(Request.OperationNAME,"delete") == 0) 
     {
-        int Server_Response = 0, count = 0; // initilazied Loop condition
+        int Server_Response = 0; // initilazied Loop condition
         char DEL_msg_buffer[MAX_BUFFER_SIZE] = {0};
 
-        // Reciving bytes from server
-        while (Server_Response <=0 && count < CounterNUM){
-            
-            Server_Response = recvfrom(sockfd, DEL_msg_buffer, MAX_BUFFER_SIZE, 0,
-                                      (struct sockaddr *)&server_addr, &server_addr_len);
-            count++;
-        }
-        // Check TIMEOUT for Response from server
-        if (count == CounterNUM)
-        {
-            printf("\nSomthing went wrong getting feedback from server");
-            exit (EXIT_FAILURE);
+        // Settin ON Timeout
+        tv.tv_sec = TimeoutValue; 
+        tv.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
-        }
+
+        // Reciving bytes from server
+        Server_Response = recvfrom(sockfd, DEL_msg_buffer, MAX_BUFFER_SIZE, 0,
+                                    (struct sockaddr *)&server_addr, &server_addr_len);
+
+        // Check ERROr and Timeout
+        if (Server_Response < 4)
+        {
+            // Check Timeout ERROR
+            if (errno == EAGAIN || errno == EWOULDBLOCK) { 
+                perror("\nTimeout occurred while waiting for data");
+                printf("\nEnding Transfer session now due to timeout\n\n");
+                exit (errno); 
+            }
+            else // Other ERRORS
+            {
+                perror("Error Receiving message\n"); // Print Error detail in server terminal
+                printf("\nClient: *Didn't* Got Feedback, Request finshed and client will close\n\n");
+                exit (EXIT_FAILURE);
+            }    
+        }    
         else  // Incase for incoming bytes print Response
         {    
             printf("\nServer Response: '%s'\n", DEL_msg_buffer);
@@ -156,16 +143,22 @@ int main() {
     } // END of DELETE Handler
 
 
-        // UPLOAD Operation Handler section //
+    // UPLOAD Operation Handler section //
+
     if (strcasecmp(Request.OperationNAME,"upload") == 0)
     {
+        // Settin ON Timeout
+        tv.tv_sec = TimeoutValue; 
+        tv.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+        
         // Handeling Server Response for intial UPLOAD Request
         ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, 0);
 
         
         // Creating a DATA packet from reading file and send it to server
         FILE* Fpoint = NULL; // Itreator traverse file
-        int16_t Seq_NUM = 1; // Initial packet number
+        u_int16_t Seq_NUM = 1; // Initial packet number
         size_t last_DATApack_size = 0; // helper var
         size_t packet_buf_size = 0; // full data message size
 
@@ -207,7 +200,7 @@ int main() {
                 (const struct sockaddr *)&server_addr, sizeof(server_addr));
 
             // Handeling Server Response for packet Transfer 
-            printf("\nOPID & SeqNUM in bytes (%ld):  ",packet_buf_size);
+            printf("\nOP_ID & SeqNUM in bytes (%ld):  ",packet_buf_size);
                 for (size_t i = 0; i < 4; i++)
                     {printf("%02X ", Dpack.packet_buf[i]);}
                 printf("\n\n");

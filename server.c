@@ -3,33 +3,18 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include "udp_file_transfer.h"
 
 #define PORT 55555
-#define MAX_BUFFER_SIZE 1024
-#define Packet_Max_SIZE 512
 #define UPLOAD_Folder_NAME "./UploadedFiles"
 
-/* OP_CODE */
-#define UPLOAD      1 
-#define DOWNLAOD    2
-#define DATA        3
-#define ACK         4 
-#define ERROR       5
-#define DELETE      6
-
-typedef struct {// Request INFO
-    int16_t CurOP_ID;
-    char CurOP_FilePATH[256];
-    size_t FilePATH_len;
-    char CurOP_Detail[256];
-} CurrRequestINFO;
 
 
 
 int main() {
     
-    char buffer[MAX_BUFFER_SIZE];
+    unsigned char buffer[MAX_BUFFER_SIZE];
     struct sockaddr_in server_addr, client_addr;
     socklen_t addr_len = sizeof(client_addr);
     
@@ -58,10 +43,16 @@ int main() {
     // Main client Request and Data transfer Handler loop //
     while (1) 
     {
-         char ErrorHandler[256] = {0}; // Error string initialition
-         char ACK_Response[4] = {0}; 
+        char ErrorHandler[256] = {0}; // Error string initialition
+        unsigned char ACK_Response[4] = {0}; 
 
-        printf("TFTP Server listening on port %d...\n", PORT);
+        printf("\n\nTFTP Server listening on port %d...\n", PORT);
+
+        // Defining Timeout for connection and Settin it as OFF
+        struct timeval tv;
+        tv.tv_sec = 0; 
+        tv.tv_usec = 0;
+        setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
         // Recive Request from client
         int Req_msg_rec = recvfrom(sockfd, buffer, MAX_BUFFER_SIZE, 0,
@@ -97,8 +88,8 @@ int main() {
 
         /* Request Handler - DELETE || UPLOAD || DOWNLOAD:
             * DELETE - Deleting the file that client Requested and print and send the result detail.
-            * DOWNLOAD - 
             * UPLOAD - 
+            * DOWNLOAD - 
          */ 
 
         // DELETE Request Handler section //
@@ -138,13 +129,14 @@ int main() {
             FILE* Fpoint; // Itreator traverse file
 
             snprintf(FilePATHinServer, FilePATHinServer_len, "%s/%s", UPLOAD_Folder_NAME, ClientRequest.CurOP_FilePATH);
-           
-            while (access(FilePATHinServer, F_OK) == 0) { 
-               // Handels file of same name already in server
-               strcat(FilePATHinServer, "_copy");
 
-            }  
-            Fpoint = fopen(FilePATHinServer,"ab"); // Creating a poineter file to scan the intented file
+            // Handels file with same name in server upload folder and assigin diffrent name
+            while (access(FilePATHinServer, F_OK) == 0) 
+                  {strcat(FilePATHinServer, "_copy");}
+
+            
+            // Creating a poineter file to scan the intented file
+            Fpoint = fopen(FilePATHinServer,"ab"); 
             
 
             // Building ACK Response and sending to client
@@ -152,38 +144,49 @@ int main() {
             printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
 
 
-            // Reciving packet and sending ACK
+
+            // Set TIMEOUT for connection
+            tv.tv_sec = TimeoutValue; 
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
+
+            // Reciving packet and sending ACK loop
             while (1) 
             {
-                int Req_msg_rec = 0, count = 0; // initilazied Loop condition
+                int Req_msg_rec = 0;// initilaztion
 
                 // Reciving bytes from client
-                while (Req_msg_rec <=0 && count < CounterNUM){
-
-                    Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
-                                        (struct sockaddr *)&client_addr, &addr_len);
-                    count++;
-                }
+                Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
+                                    (struct sockaddr *)&client_addr, &addr_len);
                 
-                // Check TIMEOUT for Response from server
-                if (count == CounterNUM)
-                {
-                    printf("\nTimeout: Somthing went wrong...Ending Transfer session\n\n");
-                    break;
-                }
-                   
-                if ( Req_msg_rec <= 0) // ERROR 
-                { 
-                    // Print Error detail in server terminal
-                    perror("Error receiving message\n"); 
-                
-                    // Save Error detail in ErrorHandler and send it to Client
-                    sprintf(ErrorHandler,"Error receiving message: %s", strerror(errno));
-                    sendto(sockfd, ErrorHandler, 256, 0,(const struct sockaddr *)&client_addr, addr_len);
-                
-                    printf("\nResponse sent to client\nListinig to further Request...\n\n\n");
-                    break;
-                }
+                if (Req_msg_rec < 4) {
+                    // Check Timeout ERROR
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) { 
+                        perror("\nTimeout occurred while waiting for data");
+                    
+                        // In case of timeout midway --> Deleting partial file left in Upload folder
+                        if (access(FilePATHinServer, F_OK) == 0) // Check if file exists
+                        {
+                            if (RequestHandler_Delete(FilePATHinServer, ClientRequest.CurOP_Detail) != 0) {
+                                 printf("\nSomething went wrong trying deleting partial file...");
+                            }
+                            printf("%s\n\n", ClientRequest.CurOP_Detail);
+                        } 
+                        else // File not exist
+                            {printf("\nPartial file %s not found.\n", FilePATHinServer);}
+                        
+                        printf("\nEnding Transfer session now due to timeout\n\n");
+                        break; 
+                    } 
+                    else { // Another type of ERROR
+                        perror("Error receiving message\n");
+                        // Save Error detail in ErrorHandler and send it to Client
+                        sprintf(ErrorHandler, "Error receiving message: %s", strerror(errno));
+                        sendto(sockfd, ErrorHandler, 256, 0, (const struct sockaddr *)&client_addr, addr_len);
+                        printf("\nResponse sent to client\nListening to further Request...\n\n\n");
+                        break; 
+                    }
+                }                    
 
                 if ( Req_msg_rec > 4 ) // Print message recieved in bytes
                 {
@@ -195,24 +198,23 @@ int main() {
 
                    // Copying DATA to File in the server
                    fwrite((buffer + 4), 1, (Req_msg_rec - 4), Fpoint);
-
                 }
             
                 if ( Req_msg_rec == 4 || Req_msg_rec != 512 ) { // Reached END OF FILE
 
                     // Building ACK Response and sending to client
-                    ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, (int16_t)((buffer[2] << 8) | buffer[3]));
-                    printf("\r\r\nEOF: UPLOAD completed successfully\nResponse sent to client\n\n");
+                    ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
+                    printf("\r\r\nEOF: UPLOAD completed successfully\nResponse sent to client\n\n\n");
                     break;
                 }
 
-                
                 // If reach here in the loop: (the order of the if condition is relvant)
                 // Building ACK Response and sending to client
-                ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, (int16_t)((buffer[2] << 8) | buffer[3]));
+                ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
                 printf("\nMessage Recived. Response sent to client\nAwaiting further Data packets.....\n\n");
 
-            }
+            } // End of Transfer and Recieving packet and ACK loop
+
             fclose(Fpoint);  
 
         }//END of UPLOAD Handler section 
