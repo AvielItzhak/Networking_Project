@@ -139,9 +139,10 @@ int main() {
             Fpoint = fopen(FilePATHinServer,"ab"); 
             
 
-            // Building ACK Response and sending to client
+            // Building ACK Response and sending to client to start transfer DATA
             ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, 0);
             printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
+            u_int16_t Last_SeqNUM = 0, Cur_SeqNUM = 0; // define and last SeqNUM in vars for the transfer loop 
 
 
 
@@ -196,8 +197,16 @@ int main() {
                        {printf("%02X ", buffer[i]);}
                    printf("\n\n");
 
-                   // Copying DATA to File in the server
-                   fwrite((buffer + 4), 1, (Req_msg_rec - 4), Fpoint);
+                   // Checkin to see if given the right order packet
+                   memcpy(&Cur_SeqNUM, buffer + 2, 2);
+                   Cur_SeqNUM = ntohs(Cur_SeqNUM); 
+
+                   if (Last_SeqNUM == Cur_SeqNUM - 1) // Only if the right order it will Write the DATA
+                   {
+                        // Copying DATA to File in the server - Removing the OP and SeqNUM bytes
+                        fwrite((buffer + 4), 1, (Req_msg_rec - 4), Fpoint);
+                        Last_SeqNUM = Cur_SeqNUM;
+                   }   
                 }
             
                 if ( Req_msg_rec == 4 || Req_msg_rec != 512 ) { // Reached END OF FILE

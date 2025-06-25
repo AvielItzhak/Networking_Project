@@ -195,18 +195,23 @@ int main() {
             Dpack.packet_buf = DATApack_Build(Dpack.data_size, Dpack.data, Dpack.packet_id);
             packet_buf_size = Dpack.data_size + 4;
 
-            // Sending packet to server
-            sendto(sockfd, Dpack.packet_buf, packet_buf_size, 0,
-                (const struct sockaddr *)&server_addr, sizeof(server_addr));
-
-            // Handeling Server Response for packet Transfer 
-            printf("\nOP_ID & SeqNUM in bytes (%ld):  ",packet_buf_size);
-                for (size_t i = 0; i < 4; i++)
-                    {printf("%02X ", Dpack.packet_buf[i]);}
-                printf("\n\n");
-
-            ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, Dpack.packet_id);
             
+            while (1) // ACK Check LOOP and Retransmission previuos packet 
+            {
+                // Sending packet to server
+                sendto(sockfd, Dpack.packet_buf, packet_buf_size, 0,
+                    (const struct sockaddr *)&server_addr, sizeof(server_addr));
+
+                // Handeling Server Response for packet Transfer 
+                printf("\nOP_ID & SeqNUM in bytes (%ld):  ",packet_buf_size);
+                    for (size_t i = 0; i < 4; i++)
+                        {printf("%02X ", Dpack.packet_buf[i]);}
+                    printf("\n\n");
+
+                if (ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, Dpack.packet_id))
+                    {break;} // Only if recivied the last Seq_NUM NOT Reach here and keep looping
+            }
+
             // Preparing variables for next itertion - Freeing allocated memory
             free(Dpack.packet_buf);
             Seq_NUM++;

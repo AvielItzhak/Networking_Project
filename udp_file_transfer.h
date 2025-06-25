@@ -23,6 +23,7 @@
 
 
 
+
 typedef struct {
     char OperationNAME[9];
     char FilePATH[256];
@@ -43,6 +44,9 @@ typedef struct {// Request INFO
     size_t FilePATH_len;
     char CurOP_Detail[256];
 } CurrRequestINFO;
+
+
+
 
 
 
@@ -218,8 +222,13 @@ int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t E
         
         // Copy the last 2 bytes into a 16bit integer variable
         memcpy(&Seq_NUM_Rec_bytes, Response + 2, sizeof(Seq_NUM_Rec_bytes));
-
-        return (Seq_NUM_Rec_bytes == Exp_Seq_NUM ? 1 : 0);
+        if (Seq_NUM_Rec_bytes == 0) // First Request 0
+            {return Seq_NUM_Rec_bytes == Exp_Seq_NUM ? 1 : 0;}
+        
+        if (Seq_NUM_Rec_bytes == Exp_Seq_NUM ? 1 : 0) // Right Seq_NUM
+            {return 2;}
+        else  // The last Seq_NUM
+            {return Seq_NUM_Rec_bytes == Exp_Seq_NUM - 1 ? -1 : 0;}
     }
 
     else {return 0;} // If not the right size
@@ -231,45 +240,57 @@ int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t E
 /* This function recive Response from and check ERRORS and Correct Response */ 
 int ServerResponseHandleACK(int sockfd, struct sockaddr_in server_addr,  socklen_t server_addr_len, int16_t Seq_NUM) {
        
-        int Server_Response = 0; // initilazied Loop condition
-        unsigned char ACK_Resp_buf[4] = {0}; 
+    int Server_Response = 0; // initilazied Loop condition
+    unsigned char ACK_Resp_buf[4] = {0}; 
 
-         // Reciving bytes from server
-        Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(ACK_Resp_buf), 0,
-                                      (struct sockaddr *)&server_addr, &server_addr_len);
+        // Reciving bytes from server
+    Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(ACK_Resp_buf), 0,
+                                    (struct sockaddr *)&server_addr, &server_addr_len);
 
-        // Check ERROR and Timeout
-        if (Server_Response < 4)
-        {
-            // Check Timeout ERROR
-            if (errno == EAGAIN || errno == EWOULDBLOCK) { 
-                perror("\nTimeout occurred while waiting for Response");
-                printf("\nEnding Transfer session now due to timeout\n\n");
-                exit (errno); 
-            }
-            else // Other ERRORS
-            {
-                perror("Error Receiving message\n"); // Print Error detail in server terminal
-                printf("\nClient: *Didn't* Got Feedback, Request finshed and client will close\n\n");
-                exit (EXIT_FAILURE);
-            }    
-        }   
-
-        else { // In the case of incoming bytes print Response
-            printf("\nServer Response:\n");
-                for (int i = 0; i < Server_Response; i++)
-                    {printf("%02X ", ACK_Resp_buf[i]);}
-                printf("\n\n");
-
-            // Checking for correct ACK Response bytes
-            if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf, Seq_NUM) == 1)
-                {printf("\nClient: Correct ACK, Initiating UPLOAD\n\n");}
-            else {
-                printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
-                exit (EXIT_FAILURE);
-            }
+    // Check ERROR and Timeout
+    if (Server_Response < 4)
+    {
+        // Check Timeout ERROR
+        if (errno == EAGAIN || errno == EWOULDBLOCK) { 
+            perror("\nTimeout occurred while waiting for Response");
+            printf("\nEnding Transfer session now due to timeout\n\n");
+            exit (errno); 
         }
-        return 0;
+        else // Other ERRORS
+        {
+            perror("Error Receiving message\n"); // Print Error detail in server terminal
+            printf("\nClient: *Didn't* Got Feedback, Request finshed and client will close\n\n");
+            exit (EXIT_FAILURE);
+        }    
+    }   
+
+    else 
+    { // In the case of incoming bytes print Response
+        printf("\nServer Response:\n");
+            for (int i = 0; i < Server_Response; i++)
+                {printf("%02X ", ACK_Resp_buf[i]);}
+            printf("\n\n");
+
+        // Checking for correct ACK Response bytes - Right ACK || LAST SeqNUM || Unknown ACK
+        if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf, Seq_NUM) > 0)
+        {
+            printf("\nClient: Correct ACK, Initiating packet Transfer\n\n");
+            return 1; // Break ACK_LOOP
+        }
+
+        if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf, Seq_NUM) < 0)
+        {
+            printf("\nClient: NOT Correct ACK, Resending Last packet\n\n");
+            return 0; // KEEP ACK_LOOP
+        }
+
+        else 
+        {
+            printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
+            exit (EXIT_FAILURE); // Ending Transfer and exiting program with Failiure
+        }
+    }
+    return -1;
 }
 
 
