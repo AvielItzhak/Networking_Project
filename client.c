@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <sys/time.h>
@@ -10,6 +11,7 @@
 
 #define SERVER_IP "127.0.0.1" // Loopback
 #define PORT 55555
+#define DOWNLOAD_Folder_NAME "./DownloadedFiles"
 
 
 
@@ -153,7 +155,7 @@ int main() {
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
         
         // Handeling Server Response for intial UPLOAD Request
-        ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, 0);
+        ResponseHandleACK(sockfd, server_addr,  server_addr_len, 0);
 
         
         // Creating a DATA packet from reading file and send it to server
@@ -208,7 +210,7 @@ int main() {
                         {printf("%02X ", Dpack.packet_buf[i]);}
                     printf("\n\n");
 
-                if (ServerResponseHandleACK(sockfd, server_addr,  server_addr_len, Dpack.packet_id))
+                if (ResponseHandleACK(sockfd, server_addr,  server_addr_len, Dpack.packet_id))
                     {break;} // Only if recivied the last Seq_NUM NOT Reach here and keep looping
             }
 
@@ -227,8 +229,130 @@ int main() {
        
     }// END of UPLOAD Handler
 
-    // DOWNLOAD
 
+     // DOWNLOAD Operation Handler section //
+
+    if (strcasecmp(Request.OperationNAME,"download") == 0)
+    {
+        char ErrorHandler[256] = {0}; // Error string initialition
+        unsigned char ACK_Response[4] = {0};
+        unsigned char buffer[MAX_BUFFER_SIZE] = {0};
+
+        // In case DOWNLOAD folder doesn't exist create it
+            if (access(DOWNLOAD_Folder_NAME, F_OK) != 0){
+                if (mkdir(DOWNLOAD_Folder_NAME,0755) == 0) {
+                    printf("Directory '%s' created successfully.\n", DOWNLOAD_Folder_NAME);
+                }else {
+                    perror("Error creating directory\n");
+                    exit(EXIT_FAILURE);
+                }
+            }
+
+            // Creating a new FILE with the given name
+            size_t FilePATHinClient_len = strlen(DOWNLOAD_Folder_NAME) + 1 + sizeof(Request.FileNAME) + 1;
+            char FilePATHinClient[MAX_BUFFER_SIZE] = {0} ;
+            FILE* Fpoint; // Itreator traverse file
+
+            snprintf(FilePATHinClient, FilePATHinClient_len, "%s/%s", DOWNLOAD_Folder_NAME, Request.FileNAME);
+            printf("%s",FilePATHinClient);
+
+            // Handels file with same name in client download folder and assigin diffrent name
+            while (access(FilePATHinClient, F_OK) == 0) 
+                  {strcat(FilePATHinClient, "_copy");}
+
+            
+            // Creating a poineter file to scan the intented file
+            Fpoint = fopen(FilePATHinClient,"ab"); 
+            
+
+            // Building ACK Response and sending to server to start transfer DATA
+            ACK_Build_send(sockfd, server_addr, server_addr_len,ACK_Response, 0);
+            printf("\nResponse sent to server\nAwaiting Data packets.....\n\n");
+            u_int16_t Last_SeqNUM = 0, Cur_SeqNUM = 0; // define and last SeqNUM in vars for the transfer loop 
+
+
+
+            // Set TIMEOUT for connection
+            tv.tv_sec = TimeoutValue; 
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+
+
+            // Reciving packet and sending ACK loop
+            while (1) 
+            {
+                int Req_msg_rec = 0;// initilaztion
+
+                // Reciving bytes from server
+                Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
+                                    (struct sockaddr *)&server_addr, &server_addr_len);
+                
+                if (Req_msg_rec < 4) {
+                    // Check Timeout ERROR
+                    if (errno == EAGAIN || errno == EWOULDBLOCK) { 
+                        perror("\nTimeout occurred while waiting for data");
+                    
+                        // In case of timeout midway --> Deleting partial file left in Upload folder
+                        if (access(FilePATHinClient, F_OK) == 0) // Check if file exists
+                        {
+                            if (RequestHandler_Delete(FilePATHinClient, Request.OP_Detail) != 0) {
+                                 printf("\nSomething went wrong trying deleting partial file...");
+                            }
+                            printf("%s\n\n", Request.OP_Detail);
+                        } 
+                        else // File not exist
+                            {printf("\nPartial file %s not found.\n", FilePATHinClient);}
+                        
+                        printf("\nEnding Transfer session now due to timeout\n\n");
+                        break; 
+                    } 
+                    else { // Another type of ERROR
+                        perror("Error receiving message\n");
+                        // Save Error detail in ErrorHandler and send it to server
+                        sprintf(ErrorHandler, "Error receiving message: %s", strerror(errno));
+                        sendto(sockfd, ErrorHandler, 256, 0, (const struct sockaddr *)&server_addr, server_addr_len);
+                        printf("\nResponse sent to client\nListening to further Request...\n\n\n");
+                        break; 
+                    }
+                }                    
+
+                if ( Req_msg_rec > 4 ) // Print message recieved in bytes
+                {
+                   // Printing Message
+                   printf("DATA Message (%d bytes):\n", Req_msg_rec);
+                   for (int i = 0; i < 4; i++) 
+                       {printf("%02X ", buffer[i]);}
+                   printf("\n\n");
+
+                   // Checkin to see if given the right order packet
+                   memcpy(&Cur_SeqNUM, buffer + 2, 2);
+                   Cur_SeqNUM = ntohs(Cur_SeqNUM); 
+
+                   if (Last_SeqNUM == Cur_SeqNUM - 1) // Only if the right order it will Write the DATA
+                   {
+                        // Copying DATA to File in the client - Removing the OP and SeqNUM bytes
+                        fwrite((buffer + 4), 1, (Req_msg_rec - 4), Fpoint);
+                        Last_SeqNUM = Cur_SeqNUM;
+                   }   
+                }
+            
+                if ( Req_msg_rec == 4 || Req_msg_rec != 512 ) { // Reached END OF FILE
+
+                    // Building ACK Response and sending to server
+                    ACK_Build_send(sockfd, server_addr, server_addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
+                    printf("\r\r\nEOF: DOWNLOAD completed successfully\nResponse sent to server\n\n\n");
+                    break;
+                }
+
+                // If reach here in the loop: (the order of the if condition is relvant)
+                // Building ACK Response and sending to server
+                ACK_Build_send(sockfd, server_addr, server_addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
+                printf("\nMessage Recived. Response sent to server\nAwaiting further Data packets.....\n\n");
+
+            } // End of Transfer and Recieving packet and ACK loop
+
+            fclose(Fpoint);  
+
+        }//END of DOWNLOAD Handler section 
 
     return 0;
 }// END of main

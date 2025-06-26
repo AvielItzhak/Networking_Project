@@ -228,7 +228,89 @@ int main() {
 
         }//END of UPLOAD Handler section 
 
-           
+
+        // DOWNLOAD Operation Handler section //
+
+        if ( ClientRequest.CurOP_ID == DOWNLOAD )
+        {
+            // Settin ON Timeout
+            tv.tv_sec = TimeoutValue; 
+            tv.tv_usec = 0;
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+
+            // Handeling client Response for intializing DOWNLOAD 
+            ResponseHandleACK(sockfd, client_addr,  addr_len, 0);
+
+
+            // Creating a DATA packet from reading file and send it to client
+            FILE* Fpoint = NULL; // Itreator traverse file
+            u_int16_t Seq_NUM = 1; // Initial packet number
+            size_t last_DATApack_size = 0; // helper var
+            size_t packet_buf_size = 0; // full data message size
+
+            Fpoint = fopen(ClientRequest.CurOP_FilePATH,"r"); // creating a poineter file to scan the intented file
+
+            // Main Transfer to client loop
+            while (1) 
+            {
+                DataPacket Dpack = {0}; // Create a struct for packet
+                Dpack.packet_id = Seq_NUM;
+
+                // Filling up a container to up to a total max of 512(-4) bytes
+                Dpack.data_size = fread(Dpack.data, 1, Packet_Max_SIZE-4, Fpoint);
+
+
+                // Check for EOF - Condition to end loop
+                if (Dpack.data_size == 0) {
+
+                    if (feof(Fpoint)) { // Due to EOF
+                        printf("\nReached END OF FILE.\n");
+                        if (last_DATApack_size == 508) // special case
+                            {memset(Dpack.data, 0, Packet_Max_SIZE - 4);;} // give client indication for ending transfer
+                        else 
+                            {free(Dpack.packet_buf); break;} // End transfer loop
+                    
+                    } 
+                    else if (ferror(Fpoint)) { // Due to ERROR
+                        printf("ERROR while reading from file.\n\n");
+                        break; //****ERRROr HANDLER */
+                    }
+                }
+
+                // Building DATA packet message
+                Dpack.packet_buf = DATApack_Build(Dpack.data_size, Dpack.data, Dpack.packet_id);
+                packet_buf_size = Dpack.data_size + 4;
+
+
+                while (1) // ACK Check LOOP and Retransmission previuos packet 
+                {
+                    // Sending packet to client
+                    sendto(sockfd, Dpack.packet_buf, packet_buf_size, 0,
+                        (const struct sockaddr *)&client_addr, sizeof(server_addr));
+
+                    // Handeling client Response for packet Transfer 
+                    printf("\nOP_ID & SeqNUM in bytes (%ld):  ",packet_buf_size);
+                        for (size_t i = 0; i < 4; i++)
+                            {printf("%02X ", Dpack.packet_buf[i]);}
+                        printf("\n\n");
+
+                    if (ResponseHandleACK(sockfd, client_addr,  addr_len, Dpack.packet_id))
+                        {break;} // Only if recivied the last Seq_NUM NOT Reach here and keep looping
+                }
+
+                // Preparing variables for next itertion - Freeing allocated memory
+                free(Dpack.packet_buf);
+                Seq_NUM++;
+                last_DATApack_size = Dpack.data_size;
+
+            }
+
+            fclose(Fpoint);
+
+            // If reach here the DOWNLOAD was successfull and Transfer completed 
+            printf ("\n\nDOWNLOAD Request completed\nListening to further Request...\n\n\n");
+        
+        }// END of UPLOAD Handler     
         
        
     }//END of client Request and Data transfer Handler loop

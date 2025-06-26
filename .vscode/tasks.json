@@ -31,7 +31,9 @@
                 "${fileDirname}/${fileBasenameNoExtension}",
                 
                 //link math lib:
-                "-lm",
+                "-lm", 
+                "-lssl", 
+                "-lcrypto",
 
             ],
             "options": {

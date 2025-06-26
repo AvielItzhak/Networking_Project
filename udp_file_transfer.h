@@ -11,7 +11,7 @@
 
 /* OP_ID */
 #define UPLOAD      1 
-#define DOWNLAOD    2
+#define DOWNLOAD    2
 #define DATA        3
 #define ACK         4 
 #define ERROR       5
@@ -28,6 +28,7 @@ typedef struct {
     char OperationNAME[9];
     char FilePATH[256];
     char FileNAME[128];
+    char OP_Detail[256];
 } Requestinfo;
 
 typedef struct {
@@ -81,7 +82,7 @@ char *REQ_msg_build(char *Operation_name,char *File_Path, size_t *msg_size){
 
     // Caculate the OP CODE based on operation name given
     if (strcasecmp(Operation_name, "download") == 0) {
-        OP_ID = DOWNLAOD;
+        OP_ID = DOWNLOAD;
     } else if (strcasecmp(Operation_name, "delete") == 0) {
         OP_ID = DELETE;
     } else if (strcasecmp(Operation_name, "upload") == 0) {
@@ -238,17 +239,17 @@ int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t E
 
 
 /* This function recive Response from and check ERRORS and Correct Response */ 
-int ServerResponseHandleACK(int sockfd, struct sockaddr_in server_addr,  socklen_t server_addr_len, int16_t Seq_NUM) {
+int ResponseHandleACK(int sockfd, struct sockaddr_in addr,  socklen_t addr_len, int16_t Seq_NUM) {
        
-    int Server_Response = 0; // initilazied Loop condition
+    int Response = 0; // initilazied Loop condition
     unsigned char ACK_Resp_buf[4] = {0}; 
 
-        // Reciving bytes from server
-    Server_Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(ACK_Resp_buf), 0,
-                                    (struct sockaddr *)&server_addr, &server_addr_len);
+    // Reciving bytes
+    Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(ACK_Resp_buf), 0,
+                                    (struct sockaddr *)&addr, &addr_len);
 
     // Check ERROR and Timeout
-    if (Server_Response < 4)
+    if (Response < 4)
     {
         // Check Timeout ERROR
         if (errno == EAGAIN || errno == EWOULDBLOCK) { 
@@ -259,34 +260,34 @@ int ServerResponseHandleACK(int sockfd, struct sockaddr_in server_addr,  socklen
         else // Other ERRORS
         {
             perror("Error Receiving message\n"); // Print Error detail in server terminal
-            printf("\nClient: *Didn't* Got Feedback, Request finshed and client will close\n\n");
+            printf("\n*Didn't* Got Feedback, Request finshed and client will close\n\n");
             exit (EXIT_FAILURE);
         }    
     }   
 
     else 
     { // In the case of incoming bytes print Response
-        printf("\nServer Response:\n");
-            for (int i = 0; i < Server_Response; i++)
+        printf("\nResponse:\n");
+            for (int i = 0; i < Response; i++)
                 {printf("%02X ", ACK_Resp_buf[i]);}
             printf("\n\n");
 
         // Checking for correct ACK Response bytes - Right ACK || LAST SeqNUM || Unknown ACK
-        if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf, Seq_NUM) > 0)
+        if (CompareResponseTOExpectedACK(Response, ACK_Resp_buf, Seq_NUM) > 0)
         {
-            printf("\nClient: Correct ACK, Initiating packet Transfer\n\n");
+            printf("\nCheck: Correct ACK, Initiating packet Transfer\n\n");
             return 1; // Break ACK_LOOP
         }
 
-        if (CompareResponseTOExpectedACK(Server_Response, ACK_Resp_buf, Seq_NUM) < 0)
+        if (CompareResponseTOExpectedACK(Response, ACK_Resp_buf, Seq_NUM) < 0)
         {
-            printf("\nClient: NOT Correct ACK, Resending Last packet\n\n");
+            printf("\nCheck: NOT Correct ACK, Resending Last packet\n\n");
             return 0; // KEEP ACK_LOOP
         }
 
         else 
         {
-            printf("\nClient: Unknown Response, Request finsihed and client will close\n\n");
+            printf("\nCheck: Unknown Response, Request finsihed and client will close\n\n");
             exit (EXIT_FAILURE); // Ending Transfer and exiting program with Failiure
         }
     }
