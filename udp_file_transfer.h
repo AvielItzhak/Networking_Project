@@ -20,7 +20,7 @@
 #define MAX_BUFFER_SIZE 1024 
 #define Packet_Max_SIZE 512
 #define TimeoutValue 10
-
+#define RetryCount 3
 
 
 
@@ -33,7 +33,6 @@ typedef struct {
 
 typedef struct {
     u_int16_t packet_id;
-    int32_t packet_crc; // CRC of this packet
     char data[Packet_Max_SIZE];
     size_t data_size;
     unsigned char *packet_buf;
@@ -239,7 +238,7 @@ int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t E
 
 
 /* This function recive Response from and check ERRORS and Correct Response */ 
-int ResponseHandleACK(int sockfd, struct sockaddr_in addr,  socklen_t addr_len, int16_t Seq_NUM) {
+int ResponseHandleACK(int count , int sockfd, struct sockaddr_in addr,  socklen_t addr_len, int16_t Seq_NUM) {
        
     int Response = 0; // initilazied Loop condition
     unsigned char ACK_Resp_buf[4] = {0}; 
@@ -254,8 +253,16 @@ int ResponseHandleACK(int sockfd, struct sockaddr_in addr,  socklen_t addr_len, 
         // Check Timeout ERROR
         if (errno == EAGAIN || errno == EWOULDBLOCK) { 
             perror("\nTimeout occurred while waiting for Response");
-            printf("\nEnding Transfer session now due to timeout\n\n");
-            exit (errno); 
+            if (count == RetryCount) // Incase Retransmit packet" RetryCount" times and reached Timeout
+            {
+                printf("\nEnding Transfer session now due to timeout\n\n");
+                exit (errno); 
+            }
+            // Incase didn't Retransmit packet "RetryCount" times. 
+            count ++;
+            printf("\nRetransmiting packet...\n\n");
+            return 0; // KEEP ACK_LOOP 
+            
         }
         else // Other ERRORS
         {

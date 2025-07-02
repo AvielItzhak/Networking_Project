@@ -98,9 +98,8 @@ int main() {
 
     /* Response Handler - DELETE || UPLOAD || DOWNLOAD:
             * DELETE - Awaiting and Reciving server detailed Response print the info and end client.
-            * UPLOAD - 
-            * DOWNLOAD - 
-
+            * UPLOAD - Awaiting ACK and intiating UPLOAD sequence - Send packet, check Response
+            * DOWNLOAD - Sending ACK to initiate DOWNLOAD sequnce - get packet, send Response
      */ 
 
         // DELETE Operation Handler section //
@@ -155,7 +154,7 @@ int main() {
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
         
         // Handeling Server Response for intial UPLOAD Request
-        ResponseHandleACK(sockfd, server_addr,  server_addr_len, 0);
+        ResponseHandleACK(RetryCount ,sockfd, server_addr,  server_addr_len, 0); // RetryCount -> Timeout will exit
 
         
         // Creating a DATA packet from reading file and send it to server
@@ -166,7 +165,7 @@ int main() {
 
         Fpoint = fopen(Request.FilePATH,"r"); // creating a poineter file to scan the intented file
 
-        // nain UPLOAD to server Transfer loop
+        // main UPLOAD to server Transfer loop
         while (1) 
         {
             DataPacket Dpack = {0}; // Create a struct for packet
@@ -197,7 +196,7 @@ int main() {
             Dpack.packet_buf = DATApack_Build(Dpack.data_size, Dpack.data, Dpack.packet_id);
             packet_buf_size = Dpack.data_size + 4;
 
-            
+            int count = 0;
             while (1) // ACK Check LOOP and Retransmission previuos packet 
             {
                 // Sending packet to server
@@ -210,7 +209,7 @@ int main() {
                         {printf("%02X ", Dpack.packet_buf[i]);}
                     printf("\n\n");
 
-                if (ResponseHandleACK(sockfd, server_addr,  server_addr_len, Dpack.packet_id))
+                if (ResponseHandleACK(count ,sockfd, server_addr,  server_addr_len, Dpack.packet_id))
                     {break;} // Only if recivied the last Seq_NUM NOT Reach here and keep looping
             }
 
@@ -276,7 +275,7 @@ int main() {
             tv.tv_sec = TimeoutValue; 
             setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
-
+            int count = 0;
             // Reciving packet and sending ACK loop
             while (1) 
             {
@@ -289,21 +288,29 @@ int main() {
                 if (Req_msg_rec < 4) {
                     // Check Timeout ERROR
                     if (errno == EAGAIN || errno == EWOULDBLOCK) { 
-                        perror("\nTimeout occurred while waiting for data");
-                    
-                        // In case of timeout midway --> Deleting partial file left in Upload folder
-                        if (access(FilePATHinClient, F_OK) == 0) // Check if file exists
+                        perror("\nTimeout occurred while waiting for data\n");
+
+                        if (count < RetryCount) // Didn't Reach Max Retrys -> Send again ACK Response
                         {
-                            if (RequestHandler_Delete(FilePATHinClient, Request.OP_Detail) != 0) {
-                                 printf("\nSomething went wrong trying deleting partial file...");
-                            }
-                            printf("%s\n\n", Request.OP_Detail);
-                        } 
-                        else // File not exist
-                            {printf("\nPartial file %s not found.\n", FilePATHinClient);}
-                        
-                        printf("\nEnding Transfer session now due to timeout\n\n");
-                        break; 
+                            printf("\nRetrasmit Last SeqNUM ACK Response\n\n");
+                            count ++;
+                        }
+                        else // Reach Max Retrys -> EXIT
+                        {
+                            // In case of timeout midway --> Deleting partial file left in Upload folder
+                            if (access(FilePATHinClient, F_OK) == 0) // Check if file exists
+                            {
+                                if (RequestHandler_Delete(FilePATHinClient, Request.OP_Detail) != 0) {
+                                     printf("\nSomething went wrong trying deleting partial file...");
+                                }
+                                printf("%s\n\n", Request.OP_Detail);
+                            } 
+                            else // File not exist
+                                {printf("\nPartial file %s not found.\n", FilePATHinClient);}
+
+                            printf("\nEnding Transfer session now due to timeout\n\n");
+                            break;
+                        }     
                     } 
                     else { // Another type of ERROR
                         perror("Error receiving message\n");
@@ -346,7 +353,7 @@ int main() {
                 // If reach here in the loop: (the order of the if condition is relvant)
                 // Building ACK Response and sending to server
                 ACK_Build_send(sockfd, server_addr, server_addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
-                printf("\nMessage Recived. Response sent to server\nAwaiting further Data packets.....\n\n");
+                printf("\nResponse sent to server\nAwaiting further Data packets.....\n\n");
 
             } // End of Transfer and Recieving packet and ACK loop
 

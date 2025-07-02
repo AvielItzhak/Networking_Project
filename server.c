@@ -8,7 +8,7 @@
 
 #define PORT 55555
 #define UPLOAD_Folder_NAME "./UploadedFiles"
-
+#define BACKUP_Folder_NAME "./Backup"
 
 
 
@@ -18,6 +18,18 @@ int main() {
     struct sockaddr_in server_addr, client_addr;
     socklen_t addr_len = sizeof(client_addr);
     
+    // Backup folder
+    // In case Upload folder doesn't exist create it
+    if (access(BACKUP_Folder_NAME, F_OK) != 0){
+        if (mkdir(BACKUP_Folder_NAME,0755) == 0) {
+            printf("Directory '%s' created successfully.\n", BACKUP_Folder_NAME);
+        }else {
+            perror("Error creating directory\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+
+
 
     // Create UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -88,8 +100,8 @@ int main() {
 
         /* Request Handler - DELETE || UPLOAD || DOWNLOAD:
             * DELETE - Deleting the file that client Requested and print and send the result detail.
-            * UPLOAD - 
-            * DOWNLOAD - 
+            * DOWNLOAD - Awaiting ACK and intiating DOWNLOAD sequence - Send packet, check Response
+            * UPLOAD - Sending ACK to initiate UPLOAD sequnce - get packet, send Response 
          */ 
 
         // DELETE Request Handler section //
@@ -130,19 +142,29 @@ int main() {
 
             snprintf(FilePATHinServer, FilePATHinServer_len, "%s/%s", UPLOAD_Folder_NAME, ClientRequest.CurOP_FilePATH);
 
+            // Creating a new FILE with the given name for Backup
+            size_t Backup_FilePATHinServer_len = strlen(BACKUP_Folder_NAME) + 1 + sizeof(ClientRequest.CurOP_FilePATH) + 1;
+            char Backup_FilePATHinServer[MAX_BUFFER_SIZE] ;
+            FILE* Backup_Fpoint; // Itreator traverse file
+
+            snprintf(Backup_FilePATHinServer, Backup_FilePATHinServer_len, "%s/%s", BACKUP_Folder_NAME, ClientRequest.CurOP_FilePATH);
+
             // Handels file with same name in server upload folder and assigin diffrent name
             while (access(FilePATHinServer, F_OK) == 0) 
-                  {strcat(FilePATHinServer, "_copy");}
+                {strcat(FilePATHinServer, "_copy");}
 
+            while (access(Backup_FilePATHinServer, F_OK) == 0) 
+                {strcat(Backup_FilePATHinServer, "_copy");}
             
             // Creating a poineter file to scan the intented file
             Fpoint = fopen(FilePATHinServer,"ab"); 
-            
+            Backup_Fpoint = fopen(Backup_FilePATHinServer,"ab");
+
 
             // Building ACK Response and sending to client to start transfer DATA
-            ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, 0);
-            printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
             u_int16_t Last_SeqNUM = 0, Cur_SeqNUM = 0; // define and last SeqNUM in vars for the transfer loop 
+            ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, Cur_SeqNUM);
+            printf("\nResponse sent to client\nAwaiting Data packets.....\n\n");
 
 
 
@@ -150,7 +172,7 @@ int main() {
             tv.tv_sec = TimeoutValue; 
             setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
-
+            int count = 0;
             // Reciving packet and sending ACK loop
             while (1) 
             {
@@ -163,21 +185,28 @@ int main() {
                 if (Req_msg_rec < 4) {
                     // Check Timeout ERROR
                     if (errno == EAGAIN || errno == EWOULDBLOCK) { 
-                        perror("\nTimeout occurred while waiting for data");
-                    
-                        // In case of timeout midway --> Deleting partial file left in Upload folder
-                        if (access(FilePATHinServer, F_OK) == 0) // Check if file exists
+                        perror("\nTimeout occurred while waiting for data\n");
+                        if (count < RetryCount) // Didn't Reach Max Retrys -> Send again ACK Response
                         {
-                            if (RequestHandler_Delete(FilePATHinServer, ClientRequest.CurOP_Detail) != 0) {
-                                 printf("\nSomething went wrong trying deleting partial file...");
-                            }
-                            printf("%s\n\n", ClientRequest.CurOP_Detail);
-                        } 
-                        else // File not exist
-                            {printf("\nPartial file %s not found.\n", FilePATHinServer);}
-                        
-                        printf("\nEnding Transfer session now due to timeout\n\n");
-                        break; 
+                            printf("\nRetrasmit Last SeqNUM ACK Response\n\n");
+                            count ++;
+                        }
+                        else // Reach Max Retrys -> EXIT
+                        {
+                            // In case of timeout midway --> Deleting partial file left in Upload folder
+                            if (access(FilePATHinServer, F_OK) == 0) // Check if file exists
+                            {
+                                if (RequestHandler_Delete(FilePATHinServer, ClientRequest.CurOP_Detail) != 0) {
+                                     printf("\nSomething went wrong trying deleting partial file...");
+                                }
+                                printf("%s\n\n", ClientRequest.CurOP_Detail);
+                            } 
+                            else // File not exist
+                                {printf("\nPartial file %s not found.\n", FilePATHinServer);}
+
+                            printf("\nEnding Transfer session now due to timeout\n\n");
+                            break; 
+                        }    
                     } 
                     else { // Another type of ERROR
                         perror("Error receiving message\n");
@@ -205,6 +234,7 @@ int main() {
                    {
                         // Copying DATA to File in the server - Removing the OP and SeqNUM bytes
                         fwrite((buffer + 4), 1, (Req_msg_rec - 4), Fpoint);
+                        fwrite((buffer + 4), 1, (Req_msg_rec - 4), Backup_Fpoint);
                         Last_SeqNUM = Cur_SeqNUM;
                    }   
                 }
@@ -212,19 +242,24 @@ int main() {
                 if ( Req_msg_rec == 4 || Req_msg_rec != 512 ) { // Reached END OF FILE
 
                     // Building ACK Response and sending to client
-                    ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
+                    memcpy(&Cur_SeqNUM, buffer + 2, 2);
+                    Cur_SeqNUM = ntohs(Cur_SeqNUM); 
+
+                    ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, Cur_SeqNUM);
                     printf("\r\r\nEOF: UPLOAD completed successfully\nResponse sent to client\n\n\n");
+                    
                     break;
                 }
 
                 // If reach here in the loop: (the order of the if condition is relvant)
                 // Building ACK Response and sending to client
-                ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
-                printf("\nMessage Recived. Response sent to client\nAwaiting further Data packets.....\n\n");
+                ACK_Build_send(sockfd, client_addr, addr_len,ACK_Response, Cur_SeqNUM);
+                printf("\nResponse sent to client\nAwaiting further Data packets.....\n\n");
 
             } // End of Transfer and Recieving packet and ACK loop
 
-            fclose(Fpoint);  
+            fclose(Fpoint);
+            fclose(Backup_Fpoint);  
 
         }//END of UPLOAD Handler section 
 
@@ -239,7 +274,7 @@ int main() {
             setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
             // Handeling client Response for intializing DOWNLOAD 
-            ResponseHandleACK(sockfd, client_addr,  addr_len, 0);
+            ResponseHandleACK(RetryCount ,sockfd, client_addr,  addr_len, 0); // RetryCount -> Timeout will exit
 
 
             // Creating a DATA packet from reading file and send it to client
@@ -281,7 +316,7 @@ int main() {
                 Dpack.packet_buf = DATApack_Build(Dpack.data_size, Dpack.data, Dpack.packet_id);
                 packet_buf_size = Dpack.data_size + 4;
 
-
+                int count = 0;
                 while (1) // ACK Check LOOP and Retransmission previuos packet 
                 {
                     // Sending packet to client
@@ -294,7 +329,7 @@ int main() {
                             {printf("%02X ", Dpack.packet_buf[i]);}
                         printf("\n\n");
 
-                    if (ResponseHandleACK(sockfd, client_addr,  addr_len, Dpack.packet_id))
+                    if (ResponseHandleACK(count ,sockfd, client_addr,  addr_len, Dpack.packet_id))
                         {break;} // Only if recivied the last Seq_NUM NOT Reach here and keep looping
                 }
 
