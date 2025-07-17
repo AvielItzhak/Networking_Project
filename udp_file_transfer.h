@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <arpa/inet.h>
 
+
 /* OP_ID */
 #define UPLOAD      1 
 #define DOWNLOAD    2
@@ -65,7 +66,7 @@ void CheckArgError (char OperationNAME[9], char FilePATH[128])
         exit(EXIT_FAILURE);
     }
     if (access(FilePATH, R_OK) != 0 && strcasecmp(OperationNAME, "upload") == 0) {
-        fprintf(stderr, "File '%s' doesn't have read premission.\n\n", FilePATH);
+        fprintf(stderr, "File '%s' doesn't have read permission.\n\n", FilePATH);
         exit(EXIT_FAILURE);
     }
 }
@@ -79,7 +80,7 @@ char *REQ_msg_build(char *Operation_name,char *File_Path, size_t *msg_size){
     
     uint16_t OP_ID;
 
-    // Caculate the OP CODE based on operation name given
+    // calculate the OP CODE based on operation name given
     if (strcasecmp(Operation_name, "download") == 0) {
         OP_ID = DOWNLOAD;
     } else if (strcasecmp(Operation_name, "delete") == 0) {
@@ -120,7 +121,7 @@ char *REQ_msg_build(char *Operation_name,char *File_Path, size_t *msg_size){
     // Copy the mode and its null terminator
     strcpy(current_pos, "netascii");
    
-    // Return messgae size to main client
+    // Return message size to main client
     *msg_size = message_size;
 
     return message_buffer; // Return the pointer to the allocated buffer
@@ -128,7 +129,7 @@ char *REQ_msg_build(char *Operation_name,char *File_Path, size_t *msg_size){
 
 
 /* This function gets the client request in bytes along with pointers to OPID and FilePATH var in main server.
- * Translate the bytes recivied into int for OP_ID and string for FIlePATH
+ * Translate the bytes received into int for OP_ID and string for FIlePATH
  * Then using the pointers given store in var at the main server
 */
 
@@ -137,7 +138,7 @@ int Convert_REQBytes_String(unsigned char REQBytes[MAX_BUFFER_SIZE], size_t * Fi
     *OPID = (int16_t)REQBytes[1];
 
     // Finding FilePATH
-    char FilePATH_bin[256] = {0};  int i = 2; //Intiliaztions
+    char FilePATH_bin[256] = {0};  int i = 2; //initializations
     
     for (; i < MAX_BUFFER_SIZE && REQBytes[i] != '\0'; i++)
     {
@@ -170,7 +171,7 @@ int RequestHandler_Delete(char *FilePATH, char * Detail){
 
 
 /* This function create and send 32bit ACK Response for Upload Request and DATA packet
-    * It recive the intendet Response buffer pointer and packet_SeqNUM
+    * It receive the intended Response buffer pointer and packet_SeqNUM
     * The function build the correct response and assign it to given buffer
 */
 int ACK_Build(unsigned char *Response_buf, u_int16_t packet_SeqNUM){
@@ -188,7 +189,7 @@ int ACK_Build(unsigned char *Response_buf, u_int16_t packet_SeqNUM){
     return 0;
 }
 
-/* A complemntry function to send ACK_build output*/
+/* A complentry function to send ACK_build output*/
 int ACK_Build_send(int sockfd, struct sockaddr_in client_addr, socklen_t addr_len,unsigned char *ACK_Response, u_int16_t packet_SeqNUM){
 
     // Building ACK Response and sending to client
@@ -202,7 +203,7 @@ int ACK_Build_send(int sockfd, struct sockaddr_in client_addr, socklen_t addr_le
 }
 
 
-/* This function check that client recivied the correct ACK respone for UPLOAD*/
+/* This function check that client redivide the correct ACK response for UPLOAD*/
 int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t Exp_Seq_NUM){
     
     int16_t ACK_VALUE = 0x0004; // Correct ACK for UPLOAD
@@ -237,13 +238,13 @@ int CompareResponseTOExpectedACK(int bytes, unsigned char *Response, u_int16_t E
 
 
 
-/* This function recive Response from and check ERRORS and Correct Response */ 
+/* This function receive Response from and check ERRORS and Correct Response */ 
 int ResponseHandleACK(int count , int sockfd, struct sockaddr_in addr,  socklen_t addr_len, int16_t Seq_NUM) {
        
-    int Response = 0; // initilazied Loop condition
+    int Response = 0; // initialized Loop condition
     unsigned char ACK_Resp_buf[4] = {0}; 
 
-    // Reciving bytes
+    // receiving bytes
     Response = recvfrom(sockfd, ACK_Resp_buf, sizeof(ACK_Resp_buf), 0,
                                     (struct sockaddr *)&addr, &addr_len);
 
@@ -267,8 +268,8 @@ int ResponseHandleACK(int count , int sockfd, struct sockaddr_in addr,  socklen_
         else // Other ERRORS
         {
             perror("Error Receiving message\n"); // Print Error detail in server terminal
-            printf("\n*Didn't* Got Feedback, Request finshed and client will close\n\n");
-            exit (EXIT_FAILURE);
+            printf("\n*Didn't* Got Feedback, Request finished and client will close\n\n");
+            exit (errno);
         }    
     }   
 
@@ -294,8 +295,8 @@ int ResponseHandleACK(int count , int sockfd, struct sockaddr_in addr,  socklen_
 
         else 
         {
-            printf("\nCheck: Unknown Response, Request finsihed and client will close\n\n");
-            exit (EXIT_FAILURE); // Ending Transfer and exiting program with Failiure
+            printf("\nCheck: Unknown Response, Request finished and client will close\n\n");
+            exit (EXIT_FAILURE); // Ending Transfer and exiting program with failure
         }
     }
     return -1;
@@ -304,7 +305,7 @@ int ResponseHandleACK(int count , int sockfd, struct sockaddr_in addr,  socklen_
 
 
 
-/* This function .....*/
+/* This function gets DATA and SeqNUM and build a DATA message*/
 
 unsigned char* DATApack_Build(size_t DATAsize, char *DATApack, u_int16_t packet_SeqNUM){
 
@@ -340,8 +341,6 @@ unsigned char* DATApack_Build(size_t DATAsize, char *DATApack, u_int16_t packet_
     return packet_buffer; // Return the pointer to the allocated buffer
 
 }
-
-
 
 
 

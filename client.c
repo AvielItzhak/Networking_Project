@@ -27,7 +27,7 @@ int main() {
 
     // Ask for user to input Request
     printf("\nPlease type: <OperationNAME> <FilePATH\n");
-    printf("Note* FilePATH caculation start from server file location\n");
+    printf("Note* FilePATH calculation start from server file location\n");
     scanf("%s %s",Request.OperationNAME,Request.FilePATH);
     printf("\nOperationNAME: %s\nFilePATH: %s\n\n",Request.OperationNAME,Request.FilePATH);
 
@@ -69,9 +69,9 @@ int main() {
 
     char *REQ_msg = REQ_msg_build(Request.OperationNAME
         ,(strcasecmp(Request.OperationNAME,"upload") == 0) ? Request.FileNAME : Request.FilePATH 
-        ,&Req_message_size); // In the case of UPLOAD send only FileNAME
+        ,&Req_message_size); // In case of UPLOAD Operation send only FileNAME
 
-    if (REQ_msg != NULL) {
+    if (REQ_msg != NULL) { // Printing Request message in bytes for debug
         printf("Request Message (%zu bytes):\n", Req_message_size);
         for (size_t i = 0; i < Req_message_size; i++) {
             printf("%02X ", REQ_msg[i]);
@@ -88,7 +88,7 @@ int main() {
 
     free(REQ_msg); // Freeing allocated memory used
     
-    // Defining Timeout for connection and Settin it as OFF
+    // Defining Timeout for connection and Setin it as OFF
     struct timeval tv;
     tv.tv_sec = 0; 
     tv.tv_usec = 0;
@@ -97,29 +97,29 @@ int main() {
 
 
     /* Response Handler - DELETE || UPLOAD || DOWNLOAD:
-            * DELETE - Awaiting and Reciving server detailed Response print the info and end client.
-            * UPLOAD - Awaiting ACK and intiating UPLOAD sequence - Send packet, check Response
-            * DOWNLOAD - Sending ACK to initiate DOWNLOAD sequnce - get packet, send Response
+            * DELETE - Awaiting and Receiving server detailed Response print the info and end client.
+            * UPLOAD - Awaiting ACK and initiating UPLOAD sequence - Send packet, check Response
+            * DOWNLOAD - Sending ACK to initiate DOWNLOAD sequence - get packet, send Response
      */ 
 
         // DELETE Operation Handler section //
 
     if (strcasecmp(Request.OperationNAME,"delete") == 0) 
     {
-        int Server_Response = 0; // initilazied Loop condition
+        int Server_Response = 0; // initialized Loop condition
         char DEL_msg_buffer[MAX_BUFFER_SIZE] = {0};
 
-        // Settin ON Timeout
+        // Setin Timeout ON 
         tv.tv_sec = TimeoutValue; 
         tv.tv_usec = 0;
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
 
 
-        // Reciving bytes from server
+        // Receiving bytes from server
         Server_Response = recvfrom(sockfd, DEL_msg_buffer, MAX_BUFFER_SIZE, 0,
                                     (struct sockaddr *)&server_addr, &server_addr_len);
 
-        // Check ERROr and Timeout
+        // Check ERROR and Timeout
         if (Server_Response < 4)
         {
             // Check Timeout ERROR
@@ -131,14 +131,14 @@ int main() {
             else // Other ERRORS
             {
                 perror("Error Receiving message\n"); // Print Error detail in server terminal
-                printf("\nClient: *Didn't* Got Feedback, Request finshed and client will close\n\n");
-                exit (EXIT_FAILURE);
+                printf("\nClient: *Didn't* Got Feedback, Request finished and client will close\n\n");
+                exit (errno);
             }    
         }    
         else  // Incase for incoming bytes print Response
         {    
             printf("\nServer Response: '%s'\n", DEL_msg_buffer);
-            printf("\nClient: Got Feedback, Request finshed and client will close\n\n");
+            printf("\nClient: Got Feedback, Request finished and client will close\n\n");
             exit (EXIT_SUCCESS);
         }
     } // END of DELETE Handler
@@ -148,24 +148,24 @@ int main() {
 
     if (strcasecmp(Request.OperationNAME,"upload") == 0)
     {
-        // Settin ON Timeout
+        // Setin ON Timeout
         tv.tv_sec = TimeoutValue; 
         tv.tv_usec = 0;
         setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
         
-        // Handeling Server Response for intial UPLOAD Request
+        // Handleing Server Response for initial UPLOAD Request
         ResponseHandleACK(RetryCount ,sockfd, server_addr,  server_addr_len, 0); // RetryCount -> Timeout will exit
 
         
-        // Creating a DATA packet from reading file and send it to server
-        FILE* Fpoint = NULL; // Itreator traverse file
+        // Creating a DATA packet from reading file and sendin it to server
+        FILE* Fpoint = NULL; // Iterator traverse file
         u_int16_t Seq_NUM = 1; // Initial packet number
         size_t last_DATApack_size = 0; // helper var
         size_t packet_buf_size = 0; // full data message size
 
-        Fpoint = fopen(Request.FilePATH,"r"); // creating a poineter file to scan the intented file
+        Fpoint = fopen(Request.FilePATH,"r"); // Creating a pointer file to scan the intended file
 
-        // main UPLOAD to server Transfer loop
+        // Main UPLOAD to server Transfer loop
         while (1) 
         {
             DataPacket Dpack = {0}; // Create a struct for packet
@@ -181,14 +181,15 @@ int main() {
                 if (feof(Fpoint)) { // Due to EOF
                     printf("\nReached END OF FILE.\n");
                     if (last_DATApack_size == 508) // special case
-                        {memset(Dpack.data, 0, Packet_Max_SIZE - 4);;} // give server indication for ending transfer
+                        {memset(Dpack.data, 0, Packet_Max_SIZE - 4);} // Send server indication for ending transfer
                     else 
                         {free(Dpack.packet_buf); break;} // End transfer loop
                  
                 } 
                 else if (ferror(Fpoint)) { // Due to ERROR
                     printf("ERROR while reading from file.\n\n");
-                    break; //****ERRROr HANDLER */
+                    printf("\nClient: Couldn't Read FILE, Request finished and client will close\n\n");
+                    exit(errno); // End client
                 }
             }
 
@@ -197,23 +198,23 @@ int main() {
             packet_buf_size = Dpack.data_size + 4;
 
             int count = 0;
-            while (1) // ACK Check LOOP and Retransmission previuos packet 
+            while (1) // ACK Check LOOP and Retransmission previous packet 
             {
                 // Sending packet to server
                 sendto(sockfd, Dpack.packet_buf, packet_buf_size, 0,
                     (const struct sockaddr *)&server_addr, sizeof(server_addr));
 
-                // Handeling Server Response for packet Transfer 
+                // handleing Server Response for packet Transfer 
                 printf("\nOP_ID & SeqNUM in bytes (%ld):  ",packet_buf_size);
                     for (size_t i = 0; i < 4; i++)
                         {printf("%02X ", Dpack.packet_buf[i]);}
                     printf("\n\n");
 
                 if (ResponseHandleACK(count ,sockfd, server_addr,  server_addr_len, Dpack.packet_id))
-                    {break;} // Only if recivied the last Seq_NUM NOT Reach here and keep looping
+                    {break;} // Only if received the last Seq_NUM NOT Reach here and keep looping
             }
 
-            // Preparing variables for next itertion - Freeing allocated memory
+            // Preparing variables for next iteration - Freeing allocated memory
             free(Dpack.packet_buf);
             Seq_NUM++;
             last_DATApack_size = Dpack.data_size;
@@ -222,7 +223,7 @@ int main() {
         
         fclose(Fpoint);
 
-        // If reach here the UPLOAD was successfull and client will close
+        // If reach here the UPLOAD was successful and client will close
         printf ("\n\nUPLOAD Request completed\nclient will now close.\n\n");
         exit (EXIT_SUCCESS);
        
@@ -233,7 +234,7 @@ int main() {
 
     if (strcasecmp(Request.OperationNAME,"download") == 0)
     {
-        char ErrorHandler[256] = {0}; // Error string initialition
+        char ErrorHandler[256] = {0}; // Error string initialization
         unsigned char ACK_Response[4] = {0};
         unsigned char buffer[MAX_BUFFER_SIZE] = {0};
 
@@ -242,25 +243,25 @@ int main() {
                 if (mkdir(DOWNLOAD_Folder_NAME,0755) == 0) {
                     printf("Directory '%s' created successfully.\n", DOWNLOAD_Folder_NAME);
                 }else {
-                    perror("Error creating directory\n");
-                    exit(EXIT_FAILURE);
+                    perror("Error creating DOWNLOAD directory\n");
+                    exit(errno); // Exit client
                 }
             }
 
             // Creating a new FILE with the given name
             size_t FilePATHinClient_len = strlen(DOWNLOAD_Folder_NAME) + 1 + sizeof(Request.FileNAME) + 1;
             char FilePATHinClient[MAX_BUFFER_SIZE] = {0} ;
-            FILE* Fpoint; // Itreator traverse file
+            FILE* Fpoint; // iterator traverse file
 
             snprintf(FilePATHinClient, FilePATHinClient_len, "%s/%s", DOWNLOAD_Folder_NAME, Request.FileNAME);
             printf("%s",FilePATHinClient);
 
-            // Handels file with same name in client download folder and assigin diffrent name
+            // handles file with same name in client download folder and assign different name
             while (access(FilePATHinClient, F_OK) == 0) 
                   {strcat(FilePATHinClient, "_copy");}
 
             
-            // Creating a poineter file to scan the intented file
+            // Creating a pointer file to scan the intended file
             Fpoint = fopen(FilePATHinClient,"ab"); 
             
 
@@ -276,12 +277,12 @@ int main() {
             setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
             int count = 0;
-            // Reciving packet and sending ACK loop
+            // receiving packet and sending ACK loop
             while (1) 
             {
-                int Req_msg_rec = 0;// initilaztion
+                int Req_msg_rec = 0;// initialization
 
-                // Reciving bytes from server
+                // receiving bytes from server
                 Req_msg_rec = recvfrom(sockfd, buffer, Packet_Max_SIZE, 0,
                                     (struct sockaddr *)&server_addr, &server_addr_len);
                 
@@ -292,10 +293,10 @@ int main() {
 
                         if (count < RetryCount) // Didn't Reach Max Retrys -> Send again ACK Response
                         {
-                            printf("\nRetrasmit Last SeqNUM ACK Response\n\n");
+                            printf("\nRetransmit Last SeqNUM ACK Response\n\n");
                             count ++;
                         }
-                        else // Reach Max Retrys -> EXIT
+                        else // Reach Max Retrys -> Break Transfer loop -> EXIT
                         {
                             // In case of timeout midway --> Deleting partial file left in Upload folder
                             if (access(FilePATHinClient, F_OK) == 0) // Check if file exists
@@ -309,7 +310,7 @@ int main() {
                                 {printf("\nPartial file %s not found.\n", FilePATHinClient);}
 
                             printf("\nEnding Transfer session now due to timeout\n\n");
-                            break;
+                            break; // Break Transfer loop
                         }     
                     } 
                     else { // Another type of ERROR
@@ -318,11 +319,11 @@ int main() {
                         sprintf(ErrorHandler, "Error receiving message: %s", strerror(errno));
                         sendto(sockfd, ErrorHandler, 256, 0, (const struct sockaddr *)&server_addr, server_addr_len);
                         printf("\nResponse sent to client\nListening to further Request...\n\n\n");
-                        break; 
+                        break;  // Break Transfer loop
                     }
                 }                    
 
-                if ( Req_msg_rec > 4 ) // Print message recieved in bytes
+                if ( Req_msg_rec > 4 ) // Print message received in bytes
                 {
                    // Printing Message
                    printf("DATA Message (%d bytes):\n", Req_msg_rec);
@@ -350,12 +351,12 @@ int main() {
                     break;
                 }
 
-                // If reach here in the loop: (the order of the if condition is relvant)
+                // If reach here in the loop: (the order of the if condition is relevant)
                 // Building ACK Response and sending to server
                 ACK_Build_send(sockfd, server_addr, server_addr_len,ACK_Response, (u_int16_t)((buffer[2] << 8) | buffer[3]));
                 printf("\nResponse sent to server\nAwaiting further Data packets.....\n\n");
 
-            } // End of Transfer and Recieving packet and ACK loop
+            } // End of Transfer and receiving packet and ACK loop
 
             fclose(Fpoint);  
 
